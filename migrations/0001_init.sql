@@ -1,0 +1,55 @@
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+  pass_hash TEXT NOT NULL,
+  salt TEXT NOT NULL,
+  friend_code TEXT NOT NULL UNIQUE,
+  character INTEGER,
+  coins INTEGER NOT NULL DEFAULT 100,
+  gems INTEGER NOT NULL DEFAULT 0,
+  xp INTEGER NOT NULL DEFAULT 0,
+  streak INTEGER NOT NULL DEFAULT 0,
+  last_task_day TEXT,
+  last_roll_day TEXT,
+  wither INTEGER NOT NULL DEFAULT 0,
+  frozen INTEGER NOT NULL DEFAULT 0,
+  music INTEGER NOT NULL DEFAULT 1,
+  sfx INTEGER NOT NULL DEFAULT 1,
+  pomo_work INTEGER NOT NULL DEFAULT 25,
+  pomo_break INTEGER NOT NULL DEFAULT 5,
+  pomo_reps INTEGER NOT NULL DEFAULT 2,
+  location TEXT,
+  last_seen INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+CREATE TABLE sessions (token TEXT PRIMARY KEY, user_id INTEGER NOT NULL, created_at INTEGER NOT NULL);
+CREATE TABLE tasks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  name TEXT NOT NULL,
+  description TEXT NOT NULL DEFAULT '',
+  difficulty INTEGER NOT NULL,
+  est_minutes INTEGER NOT NULL,
+  created_at INTEGER NOT NULL,
+  started_at INTEGER,
+  completed_at INTEGER,
+  actual_minutes INTEGER,
+  pomodoro INTEGER NOT NULL DEFAULT 0,
+  xp_awarded INTEGER NOT NULL DEFAULT 0,
+  coins_awarded INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX tasks_user ON tasks(user_id, completed_at);
+CREATE TABLE daily (user_id INTEGER NOT NULL, day TEXT NOT NULL, xp INTEGER NOT NULL DEFAULT 0, coins INTEGER NOT NULL DEFAULT 0, tasks_done INTEGER NOT NULL DEFAULT 0, spun INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, day));
+CREATE TABLE plots (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  user_id INTEGER NOT NULL,
+  tx INTEGER NOT NULL, ty INTEGER NOT NULL,
+  plant_id INTEGER,
+  stage INTEGER NOT NULL DEFAULT 0,
+  ready_at INTEGER,
+  UNIQUE (user_id, tx, ty)
+);
+CREATE TABLE inventory (user_id INTEGER NOT NULL, plant_id INTEGER NOT NULL, qty INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, plant_id));
+CREATE TABLE cards (user_id INTEGER NOT NULL, card_id INTEGER NOT NULL, slot INTEGER, PRIMARY KEY (user_id, card_id));
+CREATE TABLE friends (user_id INTEGER NOT NULL, friend_id INTEGER NOT NULL, status TEXT NOT NULL, PRIMARY KEY (user_id, friend_id));
+CREATE TABLE stats (user_id INTEGER NOT NULL, key TEXT NOT NULL, value INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (user_id, key));

@@ -1,0 +1,17 @@
+import { chromium } from 'playwright';
+const browser = await chromium.launch();
+const page = await browser.newPage({ viewport: { width: 1440, height: 912 } });
+page.on('console', (m) => console.log('console:', m.type(), m.text()));
+page.on('pageerror', (e) => console.log('pageerror:', e.message));
+await page.goto('http://localhost:8787');
+await page.click('[data-go="signup"]');
+const u = `dbg_${Date.now() % 100000}`;
+await page.fill('input[name=username]', u); await page.fill('input[name=password]', 'secret1'); await page.fill('input[name=verify]', 'secret1');
+await page.click('button.btn-round'); await page.waitForSelector('.char-tile'); await page.click('.char-tile[data-char="2"]'); await page.click('#c-yes');
+await page.waitForSelector('#navbar'); await page.waitForTimeout(2000);
+const pos = () => page.evaluate(() => { const s = window.__game.scene.getScenes(true)[0]; return { scene: s.scene.key, x: s.player?.x, y: s.player?.y, vel: s.player?.body?.velocity, kbEnabled: s.input.keyboard.enabled, keys: Object.fromEntries(Object.entries(s.keys || {}).map(([k, v]) => [k, v.isDown])), focus: document.activeElement?.tagName };
+});
+console.log('before', await pos());
+await page.keyboard.down('ArrowDown'); await page.waitForTimeout(300); console.log('holding', await pos()); await page.waitForTimeout(1200); await page.keyboard.up('ArrowDown');
+console.log('after', await pos());
+await browser.close();

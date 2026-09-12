@@ -1,0 +1,39 @@
+/** WebSocket client for one garden room. Movement is throttled to ~12 updates/s and only sent on change. */
+export interface PeerState { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing?: boolean }
+type Handler = {
+  roster: (you: number, peers: PeerState[]) => void; join: (p: PeerState) => void; leave: (id: number) => void;
+  move: (m: { id: number; x: number; y: number; dir: string; moving: boolean }) => void; chat: (id: number, text: string) => void; typing: (id: number, on: boolean) => void;
+};
+
+export class Net {
+  private ws?: WebSocket;
+  private last = '';
+  private lastSent = 0;
+  private closed = false;
+  constructor(private ownerId: number, private h: Handler) { this.connect(); }
+  private connect() {
+    const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+    this.ws = new WebSocket(`${proto}://${location.host}/ws/garden/${this.ownerId}`);
+    this.ws.onmessage = (ev) => {
+      const m = JSON.parse(ev.data);
+      if (m.t === 'roster') this.h.roster(m.you, m.peers);
+      else if (m.t === 'join') this.h.join(m.peer);
+      else if (m.t === 'leave') this.h.leave(m.id);
+      else if (m.t === 'move') this.h.move(m);
+      else if (m.t === 'chat') this.h.chat(m.id, m.text);
+      else if (m.t === 'typing') this.h.typing(m.id, m.on);
+    };
+    this.ws.onclose = () => { if (!this.closed) setTimeout(() => this.connect(), 2000); };
+  }
+  move(x: number, y: number, dir: string, moving: boolean) {
+    const now = performance.now();
+    const key = `${Math.round(x)},${Math.round(y)},${dir},${moving}`;
+    if (key === this.last || now - this.lastSent < 80) return;
+    this.last = key; this.lastSent = now;
+    this.send({ t: 'move', x: Math.round(x), y: Math.round(y), dir, moving });
+  }
+  chat(text: string) { this.send({ t: 'chat', text }); }
+  typing(on: boolean) { this.send({ t: 'typing', on }); }
+  private send(o: unknown) { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(o)); }
+  close() { this.closed = true; this.ws?.close(); }
+}
