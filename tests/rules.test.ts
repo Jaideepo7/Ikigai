@@ -17,7 +17,7 @@ test('levels + garden', () => {
   assert.deepEqual(levelFromXp(100), { level: 2, into: 0, next: 120 });
   assert.equal(levelFromXp(1e9).level, 20);
   assert.equal(levelFromXp(1e9).next, 0);
-  assert.equal(gardenTiles(1), 8); assert.equal(gardenTiles(20), 24);
+  assert.equal(gardenTiles(1), 12); assert.equal(gardenTiles(20), 32);
   assert.equal(plotPrice(3), 0); assert.equal(plotPrice(4), 50); assert.equal(plotPrice(6), 113);
 });
 test('spin', () => {

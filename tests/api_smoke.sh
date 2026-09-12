@@ -19,7 +19,7 @@ me=$(req a GET /api/me); echo "$me" | J "'coins',d['user']['coins'],'xp',d['user
 # plots: 4 free, then buy
 req a POST /api/plots/buy '{"tx":1,"ty":1}' | J "d['price']"
 [ "$(req a POST /api/plots/buy '{"tx":1,"ty":1}' | J "d['error']")" = "Already a plot" ]
-[ "$(req a POST /api/plots/buy '{"tx":9,"ty":1}' | J "d['error']")" = "Outside your garden" ]
+[ "$(req a POST /api/plots/buy '{"tx":12,"ty":1}' | J "d['error']")" = "Outside your garden" ]
 pid=$(req a GET /api/me | J "d['plots'][0]['id']")
 req a POST /api/plots/$pid/plant '{"plant_id":1}' | J "d['ok']" >/dev/null
 [ "$(req a POST /api/plots/$pid/plant '{"plant_id":1}' | J "d['error']")" = "Plot already planted" ]

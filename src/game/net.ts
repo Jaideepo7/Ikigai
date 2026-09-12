@@ -3,6 +3,7 @@ export interface PeerState { id: number; name: string; character: number; x: num
 type Handler = {
   roster: (you: number, peers: PeerState[]) => void; join: (p: PeerState) => void; leave: (id: number) => void;
   move: (m: { id: number; x: number; y: number; dir: string; moving: boolean }) => void; chat: (id: number, text: string) => void; typing: (id: number, on: boolean) => void;
+  emote: (id: number, kind: string) => void; knocking: () => void; knock: (p: { id: number; name: string; character: number }) => void; denied: () => void;
 };
 
 export class Net {
@@ -22,6 +23,10 @@ export class Net {
       else if (m.t === 'move') this.h.move(m);
       else if (m.t === 'chat') this.h.chat(m.id, m.text);
       else if (m.t === 'typing') this.h.typing(m.id, m.on);
+      else if (m.t === 'emote') this.h.emote(m.id, m.kind);
+      else if (m.t === 'knocking') this.h.knocking();
+      else if (m.t === 'knock') this.h.knock(m);
+      else if (m.t === 'denied') { this.closed = true; this.h.denied(); }
     };
     this.ws.onclose = () => { if (!this.closed) setTimeout(() => this.connect(), 2000); };
   }
@@ -34,6 +39,8 @@ export class Net {
   }
   chat(text: string) { this.send({ t: 'chat', text }); }
   typing(on: boolean) { this.send({ t: 'typing', on }); }
+  emote(kind: string) { this.send({ t: 'emote', kind }); }
+  visit(id: number, accept: boolean) { this.send({ t: 'visit', id, accept }); }
   private send(o: unknown) { if (this.ws?.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(o)); }
   close() { this.closed = true; this.ws?.close(); }
 }

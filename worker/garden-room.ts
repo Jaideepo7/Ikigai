@@ -1,12 +1,18 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index';
 
-/** One room per garden owner. Relays movement + chat between everyone standing in that garden. */
-interface Peer { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing: boolean }
+/**
+ * One room per garden owner. Relays movement, chat, typing and emotes between everyone standing in that garden.
+ * Visitors join as "pending" while the owner is present: the owner gets a knock and must accept or decline.
+ * If the owner is not in the garden, visitors are let in straight away.
+ */
+interface Peer { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing: boolean; pending: boolean }
 type Msg =
   | { t: 'move'; x: number; y: number; dir: string; moving: boolean }
   | { t: 'chat'; text: string }
-  | { t: 'typing'; on: boolean };
+  | { t: 'typing'; on: boolean }
+  | { t: 'emote'; kind: string }
+  | { t: 'visit'; id: number; accept: boolean };
 
 export class GardenRoom extends DurableObject<Env> {
   private ownerId = 0;
@@ -17,20 +23,43 @@ export class GardenRoom extends DurableObject<Env> {
     this.ownerId = me.ownerId;
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
-    const peer: Peer = { id: me.id, name: me.name, character: me.character, x: 0, y: 0, dir: 'down', moving: false, typing: false };
+    const ownerHere = this.peers().some((p) => p.id === this.ownerId && !p.pending);
+    const pending = me.id !== this.ownerId && ownerHere;
+    const peer: Peer = { id: me.id, name: me.name, character: me.character, x: 0, y: 0, dir: 'down', moving: false, typing: false, pending };
     this.ctx.acceptWebSocket(server, [String(me.id)]);
     server.serializeAttachment(peer);
-    server.send(JSON.stringify({ t: 'roster', you: me.id, peers: this.peers().filter((p) => p.id !== me.id) }));
-    this.broadcast({ t: 'join', peer }, server);
-    await this.presence(me.id, `garden:${me.ownerId}`);
+    if (pending) {
+      server.send(JSON.stringify({ t: 'knocking' }));
+      this.sendTo(this.ownerId, { t: 'knock', id: me.id, name: me.name, character: me.character });
+    } else {
+      this.admit(server, peer);
+    }
     await this.ctx.storage.setAlarm(Date.now() + 45_000);
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  /** Let a peer into the room: roster for them, join for everyone else, presence in D1. */
+  private admit(ws: WebSocket, peer: Peer) {
+    peer.pending = false; ws.serializeAttachment(peer);
+    ws.send(JSON.stringify({ t: 'roster', you: peer.id, peers: this.peers().filter((p) => p.id !== peer.id && !p.pending) }));
+    this.broadcast({ t: 'join', peer }, ws);
+    this.ctx.waitUntil(this.presence(peer.id, `garden:${this.ownerId}`));
   }
 
   webSocketMessage(ws: WebSocket, raw: string | ArrayBuffer) {
     if (typeof raw !== 'string' || raw.length > 2000) return;
     let m: Msg; try { m = JSON.parse(raw); } catch { return; }
     const peer = ws.deserializeAttachment() as Peer;
+    if (m.t === 'visit' && peer.id === this.ownerId) {
+      for (const s of this.ctx.getWebSockets(String(m.id))) {
+        const p = s.deserializeAttachment() as Peer;
+        if (!p?.pending) continue;
+        if (m.accept) this.admit(s, p);
+        else { try { s.send(JSON.stringify({ t: 'denied' })); s.close(1000, 'denied'); } catch { /* gone */ } }
+      }
+      return;
+    }
+    if (peer.pending) return;
     if (m.t === 'move' && Number.isFinite(m.x) && Number.isFinite(m.y)) {
       Object.assign(peer, { x: m.x, y: m.y, dir: String(m.dir).slice(0, 5), moving: !!m.moving });
       ws.serializeAttachment(peer);
@@ -43,6 +72,8 @@ export class GardenRoom extends DurableObject<Env> {
     } else if (m.t === 'typing') {
       peer.typing = !!m.on; ws.serializeAttachment(peer);
       this.broadcast({ t: 'typing', id: peer.id, on: peer.typing }, ws);
+    } else if (m.t === 'emote') {
+      this.broadcast({ t: 'emote', id: peer.id, kind: String(m.kind).slice(0, 10) }, ws);
     }
   }
   async webSocketClose(ws: WebSocket) { await this.drop(ws); }
@@ -50,7 +81,7 @@ export class GardenRoom extends DurableObject<Env> {
 
   /** Keep last_seen fresh for everyone still in the room so friends lists show them online. */
   async alarm() {
-    const ids = [...new Set(this.peers().map((p) => p.id))];
+    const ids = [...new Set(this.peers().filter((p) => !p.pending).map((p) => p.id))];
     if (!ids.length) return;
     await this.env.DB.prepare(`UPDATE users SET last_seen=? WHERE id IN (${ids.map(() => '?').join(',')})`).bind(Date.now(), ...ids).run();
     await this.ctx.storage.setAlarm(Date.now() + 45_000);
@@ -60,13 +91,16 @@ export class GardenRoom extends DurableObject<Env> {
     const peer = ws.deserializeAttachment() as Peer | null;
     try { ws.close(); } catch { /* already closed */ }
     if (!peer) return;
-    this.broadcast({ t: 'leave', id: peer.id });
-    if (!this.peers().some((p) => p.id === peer.id)) await this.presence(peer.id, null);
+    if (!peer.pending) this.broadcast({ t: 'leave', id: peer.id });
+    if (!this.peers().some((p) => p.id === peer.id && !p.pending)) await this.presence(peer.id, null);
+    // owner left: anyone still knocking gets in
+    if (peer.id === this.ownerId) for (const s of this.ctx.getWebSockets()) { const p = s.deserializeAttachment() as Peer; if (p?.pending) this.admit(s, p); }
   }
   private peers(): Peer[] { return this.ctx.getWebSockets().map((s) => s.deserializeAttachment() as Peer).filter(Boolean); }
+  private sendTo(id: number, msg: unknown) { for (const s of this.ctx.getWebSockets(String(id))) { try { s.send(JSON.stringify(msg)); } catch { /* closing */ } } }
   private broadcast(msg: unknown, except?: WebSocket) {
     const s = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) if (ws !== except) { try { ws.send(s); } catch { /* closing */ } }
+    for (const ws of this.ctx.getWebSockets()) if (ws !== except && !(ws.deserializeAttachment() as Peer)?.pending) { try { ws.send(s); } catch { /* closing */ } }
   }
   private async presence(userId: number, location: string | null) {
     await this.env.DB.prepare('UPDATE users SET location=?, last_seen=? WHERE id=?').bind(location, Date.now(), userId).run();

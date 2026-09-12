@@ -25,7 +25,8 @@ sql(`INSERT INTO plots (user_id,tx,ty,plant_id,stage,ready_at) VALUES (${id},2,2
 sql(`INSERT INTO cards (user_id,card_id,slot) VALUES (${id},0,0),(${id},2,1),(${id},5,2)`);
 await page.reload(); await page.waitForSelector('#navbar'); await page.waitForTimeout(1500);
 await page.screenshot({ path: `${OUT}/30-house-cards.png` });
-await hold('ArrowRight', 1200); await hold('ArrowUp', 600); await page.keyboard.press('e'); await page.waitForTimeout(500);
+if (await page.$('#t-skip')) await page.click('#t-skip');
+await hold('ArrowRight', 1600); await hold('ArrowUp', 700); await page.keyboard.press('e'); await page.waitForTimeout(500);
 await page.screenshot({ path: `${OUT}/31-card-case.png` }); await page.keyboard.press('Escape');
 await page.keyboard.press('m'); await page.waitForSelector('.hotspot'); await page.screenshot({ path: `${OUT}/32-map.png` });
 await page.click('[data-to="garden"]'); await page.waitForTimeout(1500);
@@ -38,9 +39,13 @@ await page.reload(); await page.waitForSelector('#navbar'); await page.waitForTi
 await page.keyboard.press('m'); await page.waitForSelector('.hotspot'); await page.click('[data-to="garden"]'); await page.waitForTimeout(1500); await hold('ArrowDown', 900);
 await page.screenshot({ path: `${OUT}/34-garden-withered.png` });
 
-// frozen
-await page.keyboard.press('Escape'); await page.waitForSelector('.toggle[data-k="frozen"]'); await page.click('.toggle[data-k="frozen"]'); await page.waitForTimeout(800); await page.keyboard.press('Escape'); await page.waitForTimeout(500);
+// frozen (2 per month, confirm dialog), then the farm is closed from the house
+await page.keyboard.press('Escape'); await page.waitForSelector('#freeze'); await page.click('#freeze'); await page.waitForSelector('#c-yes'); await page.click('#c-yes'); await page.waitForTimeout(800);
+await page.screenshot({ path: `${OUT}/35a-settings-frozen.png` }); await page.keyboard.press('Escape'); await page.waitForTimeout(500);
 await page.screenshot({ path: `${OUT}/35-garden-frozen.png` });
+await page.keyboard.press('m'); await page.waitForSelector('.hotspot'); await page.click('[data-to="house"]'); await page.waitForTimeout(1200);
+await hold('ArrowDown', 1800); await page.waitForSelector('#c-yes'); await page.screenshot({ path: `${OUT}/36-frozen-exit-dialog.png` }); await page.click('#c-no'); await page.waitForTimeout(400);
+await page.screenshot({ path: `${OUT}/37-house-v2.png` });
 
 // rollover logic: last task 8 days ago, unfrozen -> wither should hit 4 and streak 0
 sql(`UPDATE users SET frozen=0, wither=0, streak=5, last_task_day='2026-09-04', last_roll_day='2026-09-05' WHERE id=${id}`);

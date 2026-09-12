@@ -1,8 +1,8 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import {
-  START, DAILY_CAP, PLANTS, CARDS, LOOTBOX_WEIGHTS, LOOTBOX_PRICE, GEM_PRICE_COINS, REEL_WEIGHTS, STAGE_FEED_COINS, STAGE_MS, STAGES,
-  WITHER_MAX, taskReward, levelFromXp, gardenTiles, plotsUnlocked, plotPrice, caseSlots, spinPayout, dayKey, addDays, daysBetween, weightedPick,
+  START, DAILY_CAP, PLANTS, CARDS, LOOTBOX_WEIGHTS, LOOTBOX_PRICE, GEM_PRICE_COINS, REEL_WEIGHTS, STAGES,
+  WITHER_MAX, FREEZES_PER_MONTH, GROWTH_OPTIONS, growthCost, growthMs, taskReward, levelFromXp, gardenTiles, plotsUnlocked, plotPrice, caseSlots, spinPayout, dayKey, addDays, daysBetween, weightedPick,
   type Reel, type Rarity,
 } from '../src/shared/rules';
 
@@ -14,6 +14,7 @@ interface UserRow {
   coins: number; gems: number; xp: number; streak: number; last_task_day: string | null; last_roll_day: string | null;
   wither: number; frozen: number; music: number; sfx: number; pomo_work: number; pomo_break: number; pomo_reps: number;
   location: string | null; last_seen: number; created_at: number;
+  freezes_used: number; freeze_month: string; growth: number; tutorial_done: number; music_track: number; music_volume: number; is_admin: number;
 }
 type Vars = { user: UserRow; today: string };
 const app = new Hono<{ Bindings: Env; Variables: Vars }>();
@@ -85,7 +86,8 @@ async function meResponse(db: D1Database, u: UserRow, today: string) {
     db.prepare('SELECT * FROM tasks WHERE user_id=? AND (completed_at IS NULL OR completed_at > ?) ORDER BY completed_at IS NOT NULL, created_at DESC').bind(u.id, now - 7 * 86_400_000).all(),
   ]);
   const daily = await getDaily(db, u.id, today);
-  return { user: publicUser(u), plots: plots.results, inventory: inventory.results, cards: cards.results, daily, tasks: tasks.results, stats: Object.fromEntries(stats.results.map((r) => [r.key, r.value])) };
+  const freezesLeft = u.freeze_month === today.slice(0, 7) ? Math.max(0, FREEZES_PER_MONTH - u.freezes_used) : FREEZES_PER_MONTH;
+  return { user: publicUser(u), freezesLeft, plots: plots.results, inventory: inventory.results, cards: cards.results, daily, tasks: tasks.results, stats: Object.fromEntries(stats.results.map((r) => [r.key, r.value])) };
 }
 
 // ---------- auth ----------
@@ -149,9 +151,25 @@ app.post('/api/me/settings', async (c) => {
   const u = c.get('user');
   const b = await c.req.json().catch(() => ({}));
   const pick = (k: keyof UserRow, lo: number, hi: number) => (Number.isInteger(b[k]) && b[k] >= lo && b[k] <= hi ? b[k] : u[k]);
-  const vals = { music: pick('music', 0, 1), sfx: pick('sfx', 0, 1), frozen: pick('frozen', 0, 1), pomo_work: pick('pomo_work', 1, 120), pomo_break: pick('pomo_break', 1, 60), pomo_reps: pick('pomo_reps', 1, 8) };
-  await c.env.DB.prepare('UPDATE users SET music=?,sfx=?,frozen=?,pomo_work=?,pomo_break=?,pomo_reps=? WHERE id=?').bind(...Object.values(vals), u.id).run();
+  const growth = GROWTH_OPTIONS.some((g) => g.value === b.growth) ? b.growth : u.growth;
+  const vals = { music: pick('music', 0, 1), sfx: pick('sfx', 0, 1), pomo_work: pick('pomo_work', 1, 120), pomo_break: pick('pomo_break', 1, 60), pomo_reps: pick('pomo_reps', 1, 8),
+    growth, tutorial_done: pick('tutorial_done', 0, 1), music_track: pick('music_track', 0, 2), music_volume: pick('music_volume', 0, 100) };
+  await c.env.DB.prepare('UPDATE users SET music=?,sfx=?,pomo_work=?,pomo_break=?,pomo_reps=?,growth=?,tutorial_done=?,music_track=?,music_volume=? WHERE id=?').bind(...Object.values(vals), u.id).run();
   return c.json(vals);
+});
+/** Freeze / unfreeze the garden. Freezing spends one of FREEZES_PER_MONTH; unfreezing is free. */
+app.post('/api/me/freeze', async (c) => {
+  const u = c.get('user'), month = c.get('today').slice(0, 7);
+  const { on } = await c.req.json().catch(() => ({}));
+  const used = u.freeze_month === month ? u.freezes_used : 0;
+  if (on && !u.frozen) {
+    if (used >= FREEZES_PER_MONTH) return bad(`No freezes left this month (${FREEZES_PER_MONTH} per month)`);
+    await c.env.DB.prepare('UPDATE users SET frozen=1, freezes_used=?, freeze_month=? WHERE id=?').bind(used + 1, month, u.id).run();
+    await bumpStat(c.env.DB, u.id, 'freezes');
+    return c.json({ frozen: 1, freezesLeft: FREEZES_PER_MONTH - used - 1 });
+  }
+  if (!on && u.frozen) await c.env.DB.prepare('UPDATE users SET frozen=0 WHERE id=?').bind(u.id).run();
+  return c.json({ frozen: on ? 1 : 0, freezesLeft: FREEZES_PER_MONTH - used });
 });
 
 // ---------- tasks ----------
@@ -160,15 +178,22 @@ app.post('/api/tasks', async (c) => {
   const b = await c.req.json().catch(() => ({}));
   const name = typeof b.name === 'string' ? b.name.trim().slice(0, 50) : '';
   const description = typeof b.description === 'string' ? b.description.trim().slice(0, 200) : '';
+  const folder = typeof b.folder === 'string' ? b.folder.trim().slice(0, 30) : '';
   const difficulty = Number(b.difficulty), est = Number(b.est_minutes);
   if (!name) return bad('Task needs a name');
   if (![1, 2, 3].includes(difficulty)) return bad('Difficulty must be 1-3');
   if (!Number.isInteger(est) || est < 5 || est > 300) return bad('Estimate must be 5-300 minutes');
   const now = Date.now();
-  const r = await c.env.DB.prepare('INSERT INTO tasks (user_id,name,description,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?)')
-    .bind(u.id, name, description, difficulty, est, now, b.start ? now : null).run();
+  const r = await c.env.DB.prepare('INSERT INTO tasks (user_id,name,description,folder,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?,?)')
+    .bind(u.id, name, description, folder, difficulty, est, now, b.start ? now : null).run();
   await bumpStat(c.env.DB, u.id, 'tasks_created');
   return c.json(await c.env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(r.meta.last_row_id).first());
+});
+app.post('/api/tasks/:id/folder', async (c) => {
+  const u = c.get('user');
+  const folder = String((await c.req.json().catch(() => ({}))).folder ?? '').trim().slice(0, 30);
+  await c.env.DB.prepare('UPDATE tasks SET folder=? WHERE id=? AND user_id=?').bind(folder, c.req.param('id'), u.id).run();
+  return c.json({ ok: true });
 });
 app.post('/api/tasks/:id/start', async (c) => {
   const u = c.get('user');
@@ -265,9 +290,9 @@ app.post('/api/plots/:id/feed', async (c) => {
   if (!plot || !plot.plant_id) return bad('Nothing planted here', 404);
   if (plot.stage >= STAGES) return bad('Fully grown');
   if (plot.ready_at) return bad('Already growing');
-  const cost = STAGE_FEED_COINS[plot.stage];
+  const cost = growthCost(plot.stage, u.growth);
   if (u.coins < cost) return bad(`Need ${cost} coins`);
-  const ready_at = now + STAGE_MS[plot.stage];
+  const ready_at = now + growthMs(plot.stage, u.growth);
   await db.batch([
     db.prepare('UPDATE plots SET ready_at=? WHERE id=?').bind(ready_at, plot.id),
     db.prepare('UPDATE users SET coins=coins-? WHERE id=?').bind(cost, u.id),

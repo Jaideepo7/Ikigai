@@ -37,13 +37,22 @@ export function previewReward(difficulty: number, estMinutes: number) { return t
 
 // ---------- garden ----------
 export const TILE = 64;
-export function gardenTiles(level: number): number { return Math.min(8 + 2 * (level - 1), 24); }
+export function gardenTiles(level: number): number { return Math.min(12 + 2 * (level - 1), 32); }
 export function plotsUnlocked(level: number): number { return START.plots + 2 * (level - 1); }
 export function plotPrice(owned: number): number { return owned < START.plots ? 0 : Math.round(50 * Math.pow(1.5, owned - START.plots)); }
 export const STAGES = 3; // stage 0 seed, 1 sprout, 2 growing, 3 mature
 export const STAGE_FEED_COINS = [20, 40, 80];
 export const STAGE_MS = [1, 4, 12].map((h) => h * 3600_000);
 export const WITHER_MAX = 4;
+export const FREEZES_PER_MONTH = 2;
+/** Growth pace preference (settings): timer multiplier in percent and the matching feed-cost multiplier. */
+export const GROWTH_OPTIONS = [
+  { value: 50, label: 'Quick', desc: 'half the wait, double the feed cost', cost: 2 },
+  { value: 100, label: 'Normal', desc: '1h / 4h / 12h', cost: 1 },
+  { value: 200, label: 'Patient', desc: 'twice the wait, half the feed cost', cost: 0.5 },
+] as const;
+export function growthCost(stage: number, growth: number): number { const o = GROWTH_OPTIONS.find((g) => g.value === growth) ?? GROWTH_OPTIONS[1]; return Math.round(STAGE_FEED_COINS[stage] * o.cost); }
+export function growthMs(stage: number, growth: number): number { return Math.round(STAGE_MS[stage] * (growth / 100)); }
 
 // ---------- daily spin ----------
 export type Reel = 'coin' | 'sprout' | 'gem';
@@ -116,17 +125,18 @@ export interface UserState {
   id: number; username: string; friend_code: string; character: number | null;
   coins: number; gems: number; xp: number; streak: number; wither: number; frozen: number;
   music: number; sfx: number; pomo_work: number; pomo_break: number; pomo_reps: number;
+  freezes_used: number; freeze_month: string; growth: number; tutorial_done: number; music_track: number; music_volume: number; is_admin: number;
 }
 export interface Plot { id: number; tx: number; ty: number; plant_id: number | null; stage: number; ready_at: number | null }
 export interface Task {
-  id: number; name: string; description: string; difficulty: number; est_minutes: number;
+  id: number; name: string; description: string; folder: string; difficulty: number; est_minutes: number;
   created_at: number; started_at: number | null; completed_at: number | null; actual_minutes: number | null;
   pomodoro: number; xp_awarded: number; coins_awarded: number;
 }
 export interface Daily { day: string; xp: number; coins: number; tasks_done: number; spun: number }
 export interface MeResponse {
   user: UserState; plots: Plot[]; inventory: { plant_id: number; qty: number }[]; cards: { card_id: number; slot: number | null }[];
-  daily: Daily; stats: Record<string, number>; tasks: Task[];
+  daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
 }
 export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number }; plots: Plot[] }
 export interface FriendRow { id: number; username: string; character: number | null; status: 'accepted' | 'incoming' | 'outgoing'; online: boolean; location: string | null }
