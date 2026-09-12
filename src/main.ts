@@ -1,7 +1,7 @@
 import './style.css';
 import { api, ApiError } from './api';
 import { refreshMe, store, toast } from './state';
-import { landing, loginScreen, signupScreen, selectScreen } from './ui/screens';
+import { landing, loginScreen, signupScreen, adminScreen, selectScreen } from './ui/screens';
 import { startGame } from './game';
 
 const app = document.getElementById('app')!;
@@ -12,6 +12,7 @@ export const routes = {
   landing: () => show(landing()),
   login: () => show(loginScreen()),
   signup: () => show(signupScreen()),
+  admin: () => show(adminScreen()),
   select: () => show(selectScreen()),
   game: async () => { app.classList.add('hidden'); await startGame(); },
 };
@@ -38,7 +39,8 @@ app.addEventListener('submit', async (e) => {
   err.textContent = '';
   if (form.dataset.auth === 'signup' && fd.get('password') !== fd.get('verify')) { err.textContent = 'Passwords do not match'; return; }
   try {
-    await api.post(`/api/auth/${form.dataset.auth}`, { username: fd.get('username'), password: fd.get('password') });
+    const action = form.dataset.auth === 'admin' ? ((e as SubmitEvent).submitter as HTMLButtonElement | null)?.value : form.dataset.auth;
+    await api.post(`/api/auth/${action}`, { username: fd.get('username'), password: fd.get('password') });
     await boot();
   } catch (ex) { err.textContent = (ex as Error).message; }
 });

@@ -283,10 +283,10 @@ function renderMini() {
 export function mapPanel() {
   const p = openPanel(`<div class="panel-head"><h2>🗺 Map</h2><p class="sub">Click a place to teleport.</p></div>
     <div class="map-img"><img src="/assets/ui/map.png" alt="Map" />
-      <button class="hotspot" style="left:50%;top:24%" data-to="house" aria-label="Home"></button>
-      <button class="hotspot" style="left:13.5%;top:54%" data-to="garden" aria-label="My Garden"></button>
-      <button class="hotspot" style="left:89%;top:54%" data-to="friends" aria-label="Friends' Gardens"></button>
-      <div class="hotspot locked" style="left:51.5%;top:70%" title="Coming soon"><span>${ico('lock', 'sm')} locked</span></div>
+      <button class="hotspot home" style="left:50%;top:35%" data-to="house" aria-label="Home"></button>
+      <button class="hotspot garden" style="left:19%;top:57%" data-to="garden" aria-label="My Garden"></button>
+      <button class="hotspot friends" style="left:86%;top:57%" data-to="friends" aria-label="Friends' Gardens"></button>
+      <div class="hotspot locked" style="left:50%;top:67%" title="Coming soon"><span>${ico('lock', 'sm')} locked</span></div>
     </div>`, 'wide');
   name('map');
   p.querySelectorAll<HTMLElement>('[data-to]').forEach((b) => b.addEventListener('click', () => {
@@ -298,17 +298,23 @@ export function mapPanel() {
 }
 
 // ---------- inventory ----------
-export function inventoryPanel(tab: 'seeds' | 'cards' = 'seeds') {
-  const m = me(), u = m.user;
+const furnitureIcon = (kind: string) => ({ plant: '🪴', chair: '🪑', dresser: '🗄️', rug: '🟫', bookcase: '📚', sideboard: '🪵' }[kind] ?? '🪑');
+export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' = 'seeds') {
+  const m = me();
   const seeds = m.inventory.filter((i) => i.qty > 0);
   const body = tab === 'seeds'
     ? `<div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" title="${pl.name} seeds"><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.rarity}</span><span class="qty num">×${s.qty}</span></div>`; }).join('')}${Array.from({ length: Math.max(0, 8 - seeds.length) }, () => `<div class="slot empty">${ico('seedbag', 'bag dim')}<span class="nm">empty</span></div>`).join('')}</div><p class="sub" style="margin-top:10px">Walk onto a plot in your garden and press E to plant a seed. Buy more in the shop (Q).</p>`
-    : `<div class="card-row">${m.cards.map((c) => cardHtml(CARDS[c.card_id], false, c.slot !== null ? `case slot ${c.slot + 1}` : 'in inventory')).join('') || '<p class="sub">No cards yet. Buy them with gems in the shop.</p>'}</div><p class="sub" style="margin-top:10px">Display cards in the case inside your house (press E by the bookshelf).</p>`;
-  const p = openPanel(`<div class="panel-head"><h2>🎒 Inventory</h2></div>${dailyBar()}
-    <div class="card-row" style="margin-bottom:14px"><div class="stat-box">${ico('gem')}<div><small>Gems</small><b class="num">${u.gems}</b></div></div><div class="stat-box">${ico('coin')}<div><small>Coins</small><b class="num">${u.coins}</b></div></div><div class="stat-box">${ico('streak')}<div><small>Streak</small><b class="num">${u.streak}</b></div></div></div>
-    <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button></div>${body}`, 'wide');
+    : tab === 'cards'
+      ? `<div class="card-row">${m.cards.map((c) => cardHtml(CARDS[c.card_id], false, c.slot !== null ? `Case slot ${c.slot + 1}` : 'In storage')).join('') || '<div class="empty-state"><b>No cards yet.</b><span>You can buy cards in the shop.</span></div>'}</div><p class="sub" style="margin-top:10px">Put cards in the case by the bookcase in your home.</p>`
+      : `<div class="furniture-inventory">${m.furniture.map((owned) => { const f = FURNITURE.find((x) => x.id === owned.furniture_id)!; return `<article class="furniture-item" data-furniture="${f.id}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><div><b>${f.name}</b><small>${owned.slot === null ? 'In storage' : `Room slot ${owned.slot + 1}`}</small></div><select aria-label="Place ${esc(f.name)}"><option value="">Storage</option>${Array.from({ length: FURNITURE_SLOTS }, (_, i) => `<option value="${i}" ${owned.slot === i ? 'selected' : ''}>Room slot ${i + 1}</option>`).join('')}</select></article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to change your bedroom.</span></div>'}</div>`;
+  const p = openPanel(`<div class="panel-head"><div><h2>🎒 Inventory</h2><p class="sub">Seeds, cards, and bedroom furniture.</p></div></div>${dailyBar()}
+    <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">🪑 Furniture (${m.furniture.length})</button></div>${body}`, 'wide');
   name('inventory');
-  p.querySelectorAll<HTMLElement>('.tabs button').forEach((b) => b.addEventListener('click', () => inventoryPanel(b.dataset.t as 'seeds')));
+  p.querySelectorAll<HTMLElement>('.tabs button').forEach((b) => b.addEventListener('click', () => inventoryPanel(b.dataset.t as 'seeds' | 'cards' | 'furniture')));
+  p.querySelectorAll<HTMLSelectElement>('.furniture-item select').forEach((s) => s.addEventListener('change', async () => {
+    const id = Number(s.closest<HTMLElement>('[data-furniture]')!.dataset.furniture);
+    try { await api.post(`/api/furniture/${id}/place`, { slot: s.value === '' ? null : Number(s.value) }); await refreshMe(); sfx.click(); inventoryPanel('furniture'); } catch (e) { err(e); }
+  }));
 }
 export function cardHtml(c: { id: number; name: string; rarity: string; art: boolean }, locked: boolean, foot = '') {
   const art = c.art ? `<img src="/assets/cards/card_${c.id}.png" alt="" />` : `<span>${['🦊', '🦉', '🐟', '🦌', '🐼', '🐇', '🦦', '🦋', '🐈', '🐺', '🔥', '🐉'][c.id] ?? '🐾'}</span>`;
@@ -316,36 +322,40 @@ export function cardHtml(c: { id: number; name: string; rarity: string; art: boo
 }
 
 // ---------- shop ----------
-interface ShopInfo { plants: number[]; discovered: number[]; cards: number[]; daily: { spun: number } }
-export async function shopPanel(tab: 'shop' | 'plants' | 'cards' = 'shop') {
+interface ShopInfo { plants: number[]; discovered: number[]; cards: number[]; furniture: number[]; daily: { spun: number } }
+type ShopTab = 'shop' | 'cards' | 'furniture' | 'seasons' | 'plants';
+export async function shopPanel(tab: ShopTab = 'shop') {
   let info: ShopInfo;
   try { info = await api.get<ShopInfo>('/api/shop'); } catch (e) { return err(e); }
   const m = me(), u = m.user, owned = new Set(m.cards.map((c) => c.card_id)), disc = new Set(info.discovered);
-  const head = `<div class="panel-head"><div><h2>${{ shop: '🏪 Welcome to the shop!', plants: '🌿 Plant Collection', cards: '🃏 Card Collection' }[tab]}</h2><p class="sub">${{ shop: 'Coins buy seeds and gems. Gems buy animal cards for your home.', plants: 'Collect different plants to decorate your garden!', cards: 'Animals of the wild, one card at a time.' }[tab]}</p></div>
-    <div class="card-row"><span class="stat-box">${ico('coin')} <b class="num">${u.coins}</b></span><span class="stat-box">${ico('gem')} <b class="num">${u.gems}</b></span></div></div>
-    <div class="tabs"><button data-t="shop" class="${tab === 'shop' ? 'on' : ''}">🏪 Shop</button><button data-t="plants" class="${tab === 'plants' ? 'on' : ''}">🌿 Plants ${disc.size}/${PLANTS.length}</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards ${owned.size}/${CARDS.length}</button></div>`;
+  const head = `<header class="shop-head"><div><h2>Welcome to the shop!</h2><p>Choose something for your garden or room.</p></div><div class="shop-currency"><span data-currency="coin">${ico('coin')}<b class="num">${u.is_admin ? '∞' : u.coins}</b><small>coins</small></span><span data-currency="gem">${ico('gem')}<b class="num">${u.is_admin ? '∞' : u.gems}</b><small>gems</small></span></div></header>
+    <nav class="shop-tabs" aria-label="Shop sections"><button data-t="shop" class="${tab === 'shop' ? 'on' : ''}">Seeds</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">Animal cards</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">Furniture</button><button data-t="seasons" class="${tab === 'seasons' ? 'on' : ''}">Seasons</button><button data-t="plants" class="${tab === 'plants' ? 'on' : ''}">Plant book ${disc.size}/${PLANTS.length}</button></nav>`;
   let body = '';
   if (tab === 'shop') {
-    body = `<div style="display:grid;grid-template-columns:1fr 320px;gap:18px">
-      <div><h3 style="margin:6px 0">🌱 Seeds</h3><div class="shop-grid">${info.plants.map((id) => { const pl = plantById(id)!; return `<div class="shop-item"><b>${pl.name}</b><span class="rar ${pl.rarity}">${pl.rarity}</span><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="price">${ico('coin', 'sm')} ${num(pl.price)}</span><button class="btn sm sage" data-buy="${pl.id}">Buy seed</button></div>`; }).join('')}
+    body = `<div class="shop-main"><section><h3>🌱 Seeds</h3><div class="shop-grid">${info.plants.map((id) => { const pl = plantById(id)!; return `<article class="shop-item"><b>${pl.name}</b><span class="rar ${pl.rarity}">${pl.rarity}</span><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="price">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</span><button class="btn sm sage" data-buy="${pl.id}">Buy seed</button></article>`; }).join('')}
         <div class="shop-item"><b>Mystery Lootbox</b><span class="rar rare">5% rare</span><span style="font-size:44px;line-height:64px">🎁</span><span class="price">${ico('coin', 'sm')} ${num(LOOTBOX_PRICE)}</span><button class="btn sm" id="lootbox">Open</button></div>
         <div class="shop-item"><b>Gem</b><span class="rar epic">premium</span>${ico('gem', 'lg')}<span class="price">${ico('coin', 'sm')} ${num(GEM_PRICE_COINS)}</span><button class="btn sm" id="buygem">Buy 1 gem</button></div></div>
-        <h3 style="margin:14px 0 6px">🃏 Cards</h3><div class="card-row">${info.cards.length ? info.cards.map((id) => { const c = CARDS[id]; return `<div>${cardHtml(c, false)}<button class="btn sm rose" style="width:150px;margin-top:6px" data-card="${c.id}">${ico('gem', 'sm')} ${num(c.price)}</button></div>`; }).join('') : '<p class="sub">You own every card. Legendary.</p>'}</div></div>
-      <div class="spin-box"><h3 style="margin:4px 0">🎰 Daily Spin</h3><p style="margin:4px 0;font-size:14px">Pull the lever once a day. <b>Guaranteed ${num(spinBaseCoins(u.streak))} coins</b> every pull (streak bonus +${10 * Math.min(20, u.streak)}), triple on 3 coins, gems on 💎.</p>
+        </section><aside class="spin-box"><h3>🎰 Daily Spin</h3><p>Pull the lever ${u.is_admin ? 'as often as you want' : 'once a day'}. Every pull gives at least <b>${num(spinBaseCoins(u.streak))} coins</b>.</p>
         <div class="machine"><div class="reels"><div class="reel">${ico('coin', 'lg')}</div><div class="reel">🌱</div><div class="reel">${ico('gem', 'lg')}</div></div>
-          <button class="lever" id="spin" ${info.daily.spun ? 'disabled' : ''} title="${info.daily.spun ? 'Come back tomorrow' : 'Pull!'}"><span class="stick"></span><span class="knob"></span></button></div>
-        <p style="font-size:13px;margin:8px 0 0">${info.daily.spun ? 'Spun today - come back tomorrow' : '← pull the handle'}</p></div></div>`;
+          <button class="lever" id="spin" ${info.daily.spun && !u.is_admin ? 'disabled' : ''} title="${info.daily.spun && !u.is_admin ? 'Come back tomorrow' : 'Pull the lever'}"><span class="stick"></span><span class="knob"></span></button></div><p>${info.daily.spun && !u.is_admin ? 'Come back tomorrow.' : 'Pull the handle.'}</p></aside></div>`;
   } else if (tab === 'plants') {
     body = `<div class="shop-grid">${PLANTS.map((pl) => `<div class="shop-item ${disc.has(pl.id) ? '' : 'owned'}"><img src="/assets/plants/plant_${pl.sprite}.png" alt="" style="${disc.has(pl.id) ? '' : 'filter:brightness(0) opacity(.5)'}" /><b>${pl.name}</b><span class="rar ${pl.rarity}">${pl.rarity}</span><span class="price">${disc.has(pl.id) ? 'Discovered' : 'Not collected'}</span></div>`).join('')}</div>`;
-  } else {
-    body = `<div class="card-row">${CARDS.map((c) => cardHtml(c, !owned.has(c.id))).join('')}</div>`;
+  } else if (tab === 'cards') {
+    body = `<section class="shop-section"><div class="section-copy"><h3>Animal cards</h3><p>Collect cards and show them in your home.</p></div><div class="shop-card-grid">${CARDS.map((c) => `<article class="shop-card-item">${cardHtml(c, owned.has(c.id) ? false : !info.cards.includes(c.id))}${owned.has(c.id) ? '<span class="owned-label">Owned</span>' : `<button class="btn sm rose" data-card="${c.id}">${ico('gem', 'sm')} ${num(c.price)}</button>`}</article>`).join('')}</div></section>`;
+  } else if (tab === 'furniture') {
+    body = `<section class="shop-section"><div class="section-copy"><h3>Bedroom furniture</h3><p>Buy furniture here. Place it from the Furniture part of your inventory.</p></div><div class="furniture-shop">${FURNITURE.map((f) => { const has = m.furniture.some((x) => x.furniture_id === f.id); return `<article class="shop-item ${has ? 'owned' : ''}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><b>${f.name}</b><span class="price">${ico('coin', 'sm')} ${num(f.price)}</span>${has ? '<span class="owned-label">Owned</span>' : `<button class="btn sm sage" data-furniture-buy="${f.id}">Buy</button>`}</article>`; }).join('')}</div></section>`;
+  } else if (tab === 'seasons') {
+    const active = effectiveSeason(u.season, new Date().getMonth());
+    body = `<section class="shop-section season-shop"><div class="section-copy"><h3>Garden seasons</h3><p>Auto follows US seasons. A manual season costs ${SEASON_CHANGE_GEMS} gem. Auto is free.</p></div><div class="season-grid">${SEASONS.map((s) => `<button data-season="${s.value}" class="season-card ${u.season === s.value ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small><em>${s.value === 'auto' ? 'Free' : `${SEASON_CHANGE_GEMS} gem`}</em></button>`).join('')}</div><p class="season-now">Your garden now shows <b>${active}</b>.</p></section>`;
   }
-  const p = openPanel(head + body, 'xwide');
+  const p = openPanel(`<div class="shop-shell">${head}${body}</div>`, 'xwide shop-panel');
   name('shop');
-  p.querySelectorAll<HTMLElement>('.tabs button').forEach((b) => b.addEventListener('click', () => shopPanel(b.dataset.t as 'shop')));
+  p.querySelectorAll<HTMLElement>('.shop-tabs button').forEach((b) => b.addEventListener('click', () => shopPanel(b.dataset.t as ShopTab)));
   const act = async (fn: () => Promise<unknown>, after: () => void) => { try { await fn(); await refreshMe(); after(); } catch (e) { err(e); } };
   p.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/seed', { plant_id: Number(b.dataset.buy) }), () => { sfx.coin(); toast(`Bought a ${plantById(Number(b.dataset.buy))!.name} seed`); shopPanel(); })));
   p.querySelectorAll<HTMLElement>('[data-card]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/card', { card_id: Number(b.dataset.card) }), () => { sfx.chime(); toast(`${CARDS[Number(b.dataset.card)].name} added to your collection!`, 'reward'); shopPanel(); })));
+  p.querySelectorAll<HTMLElement>('[data-furniture-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/furniture', { furniture_id: Number(b.dataset.furnitureBuy) }), () => { sfx.coin(); toast('Furniture added to your inventory', 'reward'); shopPanel('furniture'); })));
+  p.querySelectorAll<HTMLElement>('[data-season]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/me/season', { season: b.dataset.season }), () => { sfx.chime(); toast('Garden season changed', 'reward'); shopPanel('seasons'); })));
   p.querySelector('#lootbox')?.addEventListener('click', () => act(async () => { const r = await api.post<{ plant_id: number; rarity: string }>('/api/shop/lootbox'); sfx.chime(); toast(`🎁 ${r.rarity.toUpperCase()}: ${plantById(r.plant_id)!.name} seed!`, 'reward'); }, () => shopPanel()));
   p.querySelector('#buygem')?.addEventListener('click', () => act(() => api.post('/api/shop/gems', { qty: 1 }), () => { sfx.coin(); shopPanel(); }));
   p.querySelector('#spin')?.addEventListener('click', async () => {
@@ -506,7 +516,7 @@ export function cardCasePanel() {
 export function sleepPanel() {
   const m = me(), d = m.daily, done = m.tasks.filter((t) => t.completed_at && new Date(t.completed_at).toDateString() === new Date().toDateString());
   const p = openPanel(`<h2 style="text-align:center">🌙 Good night</h2><p class="sub" style="text-align:center">Here is your day, ${esc(m.user.username)}.</p>
-    <div class="card-row" style="margin:14px 0"><div class="stat-box"><div><small>Tasks done</small><b class="num">${d.tasks_done}</b></div></div><div class="stat-box">${ico('xp')}<div><small>XP today</small><b class="num">${d.xp}</b></div></div><div class="stat-box">${ico('coin')}<div><small>Coins today</small><b class="num">${d.coins}</b></div></div><div class="stat-box">${ico('streak')}<div><small>Streak</small><b class="num">${m.user.streak}</b></div></div></div>
+    <div class="card-row" style="margin:14px 0"><div class="stat-box"><div><small>Tasks done</small><b class="num">${d.tasks_done}</b></div></div><div class="stat-box">${ico('xp')}<div><small>XP today</small><b class="num">${d.xp}</b></div></div><div class="stat-box">${ico('streak')}<div><small>Streak</small><b class="num">${m.user.streak}</b></div></div></div>
     ${done.length ? `<div class="task-list">${done.map((t) => `<div class="task done"><div class="check">✓</div><div><div class="name">${esc(t.name)}</div></div><div class="meta"><span class="pts">+${t.xp_awarded} XP</span></div><div></div></div>`).join('')}</div>` : '<p class="sub" style="text-align:center">No tasks finished yet today. Tomorrow is a new leaf.</p>'}
     <p class="sub" style="text-align:center;margin-top:12px">${m.user.streak ? `Keep the streak alive tomorrow: one task keeps your garden green.` : 'Finish one task tomorrow to start a streak.'}</p>
     <div class="form-actions"><button class="btn sage" id="wake">☀ Wake up</button></div>`);
