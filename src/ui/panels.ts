@@ -31,7 +31,29 @@ export function openPanel(html: string, cls = ''): HTMLElement {
   back.addEventListener('click', (e) => { if (e.target === back) closePanel(); });
   back.querySelector('.x')!.addEventListener('click', closePanel);
   overlay().appendChild(back); panelEl = back; renderMini();
-  return back.querySelector('.panel')!;
+  const panel = back.querySelector<HTMLElement>('.panel')!;
+  upgradeSelects(panel);
+  return panel;
+}
+/** Replace system select popups with menus that stay inside the game theme. */
+function upgradeSelects(root: HTMLElement) {
+  root.querySelectorAll<HTMLSelectElement>('select').forEach((select) => {
+    select.dataset.retro = '1'; select.classList.add('native-select');
+    const wrap = document.createElement('div'); wrap.className = 'retro-select';
+    const trigger = document.createElement('button'); trigger.type = 'button'; trigger.className = 'retro-select-trigger'; trigger.setAttribute('aria-haspopup', 'listbox');
+    const menu = document.createElement('div'); menu.className = 'retro-select-menu'; menu.setAttribute('role', 'listbox'); menu.hidden = true;
+    const sync = () => { const option = select.options[select.selectedIndex]; trigger.textContent = option?.textContent ?? 'Choose'; trigger.disabled = select.disabled; menu.querySelectorAll('button').forEach((b) => b.classList.toggle('on', (b as HTMLButtonElement).value === select.value)); };
+    [...select.options].forEach((option) => {
+      const item = document.createElement('button'); item.type = 'button'; item.value = option.value; item.textContent = option.textContent; item.disabled = option.disabled; item.setAttribute('role', 'option');
+      item.addEventListener('click', () => { select.value = item.value; select.dispatchEvent(new Event('change', { bubbles: true })); menu.hidden = true; trigger.setAttribute('aria-expanded', 'false'); sync(); });
+      menu.appendChild(item);
+    });
+    trigger.addEventListener('click', () => { root.querySelectorAll<HTMLElement>('.retro-select-menu').forEach((m) => { if (m !== menu) m.hidden = true; }); menu.hidden = !menu.hidden; trigger.setAttribute('aria-expanded', String(!menu.hidden)); });
+    trigger.addEventListener('keydown', (e) => { if (e.key === 'Escape') { menu.hidden = true; trigger.setAttribute('aria-expanded', 'false'); } });
+    select.addEventListener('change', sync);
+    select.insertAdjacentElement('afterend', wrap); wrap.append(trigger, menu); sync();
+  });
+  root.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.retro-select')) root.querySelectorAll<HTMLElement>('.retro-select-menu').forEach((m) => m.hidden = true); });
 }
 const name = (n: string) => { if (panelEl) panelEl.dataset.name = n; };
 export function setHint(text: string | null) {
@@ -225,7 +247,7 @@ export function pomodoroPanel(taskId: number | null = null) {
   const p = openPanel(`<div class="pomo">
     <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · 2× XP when completed</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
       <div class="face"><div class="time num" id="pt">${mmss(work * 60_000)}</div></div><div class="phase" id="pp">ready</div>
-      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset">■ Reset</button>${task ? '<button class="btn sage" id="p-done" disabled title="Finish the focus session first">Complete task</button>' : ''}</div>
+      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset">■ Reset</button>${task ? `<button class="btn sage" id="p-done" data-task="${task.id}" disabled title="Finish the focus session first">Complete task</button>` : ''}</div>
       <div class="dots" id="pd"></div></div>
     <div><h2>Settings</h2>
       <div class="stepper"><span>Work Duration</span><div><button data-k="work" data-d="-5">−</button><b class="num" id="s-work">${work} min</b><button data-k="work" data-d="5">+</button></div></div>
@@ -268,7 +290,7 @@ function renderPomo() {
       dots.innerHTML = Array.from({ length: pomo.reps * 2 }, (_, i) => { const rep = Math.floor(i / 2) + 1, ph = i % 2 ? 'break' : 'work'; const cur = rep === pomo!.rep && ph === pomo!.phase && !pomo!.done; const done = pomo!.done || rep < pomo!.rep || (rep === pomo!.rep && ph === 'work' && pomo!.phase === 'break'); return `<span class="${cur ? 'on' : done ? 'done' : ''}"><i></i>${ph}</span>`; }).join('');
     } else { pp.textContent = 'ready'; btn.textContent = '▶ Start'; dots.innerHTML = ''; }
     const doneButton = p.querySelector<HTMLButtonElement>('#p-done');
-    if (doneButton) { const ready = !!pomo?.done && pomo.taskId === Number(doneButton.closest('.panel')?.querySelector('.clock .sub') ? pomo.taskId : -1); doneButton.disabled = !ready; doneButton.title = ready ? 'Complete this task' : 'Finish the focus session first'; }
+    if (doneButton) { const ready = !!pomo?.done && pomo.taskId === Number(doneButton.dataset.task); doneButton.disabled = !ready; doneButton.title = ready ? 'Complete this task' : 'Finish the focus session first'; }
   }
   renderMini();
 }
@@ -299,21 +321,26 @@ export function mapPanel() {
 
 // ---------- inventory ----------
 const furnitureIcon = (kind: string) => ({ plant: '🪴', chair: '🪑', dresser: '🗄️', rug: '🟫', bookcase: '📚', sideboard: '🪵' }[kind] ?? '🪑');
-export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' = 'seeds') {
+export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' | 'seasons' = 'seeds') {
   const m = me();
   const seeds = m.inventory.filter((i) => i.qty > 0);
   const body = tab === 'seeds'
     ? `<div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" title="${pl.name} seeds"><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.rarity}</span><span class="qty num">×${s.qty}</span></div>`; }).join('')}${Array.from({ length: Math.max(0, 8 - seeds.length) }, () => `<div class="slot empty">${ico('seedbag', 'bag dim')}<span class="nm">empty</span></div>`).join('')}</div><p class="sub" style="margin-top:10px">Walk onto a plot in your garden and press E to plant a seed. Buy more in the shop (Q).</p>`
     : tab === 'cards'
       ? `<div class="card-row">${m.cards.map((c) => cardHtml(CARDS[c.card_id], false, c.slot !== null ? `Case slot ${c.slot + 1}` : 'In storage')).join('') || '<div class="empty-state"><b>No cards yet.</b><span>You can buy cards in the shop.</span></div>'}</div><p class="sub" style="margin-top:10px">Put cards in the case by the bookcase in your home.</p>`
-      : `<div class="furniture-inventory">${m.furniture.map((owned) => { const f = FURNITURE.find((x) => x.id === owned.furniture_id)!; return `<article class="furniture-item" data-furniture="${f.id}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><div><b>${f.name}</b><small>${owned.slot === null ? 'In storage' : `Room slot ${owned.slot + 1}`}</small></div><select aria-label="Place ${esc(f.name)}"><option value="">Storage</option>${Array.from({ length: FURNITURE_SLOTS }, (_, i) => `<option value="${i}" ${owned.slot === i ? 'selected' : ''}>Room slot ${i + 1}</option>`).join('')}</select></article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to change your bedroom.</span></div>'}</div>`;
+      : tab === 'furniture'
+        ? `<div class="furniture-inventory">${m.furniture.map((owned) => { const f = FURNITURE.find((x) => x.id === owned.furniture_id)!; return `<article class="furniture-item" data-furniture="${f.id}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><div><b>${f.name}</b><small>${owned.slot === null ? 'In storage' : `Room slot ${owned.slot + 1}`}</small></div><select aria-label="Place ${esc(f.name)}"><option value="">Storage</option>${Array.from({ length: FURNITURE_SLOTS }, (_, i) => `<option value="${i}" ${owned.slot === i ? 'selected' : ''}>Room slot ${i + 1}</option>`).join('')}</select></article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to change your bedroom.</span></div>'}</div>`
+        : (() => { const available = SEASONS.filter((s) => s.value === 'auto' || m.seasons.includes(s.value)); const active = effectiveSeason(m.user.season, new Date().getMonth()); return `<div class="section-copy"><h3>Garden season</h3><p>Choose an owned season. Auto follows the real US season.</p></div><div class="season-grid">${available.map((s) => `<button data-inventory-season="${s.value}" class="season-card ${m.user.season === s.value ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small><em>${m.user.season === s.value ? 'Selected' : 'Use season'}</em></button>`).join('')}</div><p class="season-now">Your garden now shows <b>${active}</b>.</p>`; })();
   const p = openPanel(`<div class="panel-head"><div><h2>🎒 Inventory</h2><p class="sub">Seeds, cards, and bedroom furniture.</p></div></div>${dailyBar()}
-    <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">🪑 Furniture (${m.furniture.length})</button></div>${body}`, 'wide');
+    <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">🪑 Furniture (${m.furniture.length})</button><button data-t="seasons" class="${tab === 'seasons' ? 'on' : ''}">🍂 Seasons (${m.seasons.length + 1})</button></div>${body}`, 'wide');
   name('inventory');
-  p.querySelectorAll<HTMLElement>('.tabs button').forEach((b) => b.addEventListener('click', () => inventoryPanel(b.dataset.t as 'seeds' | 'cards' | 'furniture')));
+  p.querySelectorAll<HTMLElement>('.tabs button').forEach((b) => b.addEventListener('click', () => inventoryPanel(b.dataset.t as 'seeds' | 'cards' | 'furniture' | 'seasons')));
   p.querySelectorAll<HTMLSelectElement>('.furniture-item select').forEach((s) => s.addEventListener('change', async () => {
     const id = Number(s.closest<HTMLElement>('[data-furniture]')!.dataset.furniture);
     try { await api.post(`/api/furniture/${id}/place`, { slot: s.value === '' ? null : Number(s.value) }); await refreshMe(); sfx.click(); inventoryPanel('furniture'); } catch (e) { err(e); }
+  }));
+  p.querySelectorAll<HTMLElement>('[data-inventory-season]').forEach((b) => b.addEventListener('click', async () => {
+    try { await api.post('/api/me/season', { season: b.dataset.inventorySeason }); await refreshMe(); sfx.chime(); toast('Garden season changed', 'reward'); inventoryPanel('seasons'); } catch (e) { err(e); }
   }));
 }
 export function cardHtml(c: { id: number; name: string; rarity: string; art: boolean }, locked: boolean, foot = '') {
@@ -322,7 +349,7 @@ export function cardHtml(c: { id: number; name: string; rarity: string; art: boo
 }
 
 // ---------- shop ----------
-interface ShopInfo { plants: number[]; discovered: number[]; cards: number[]; furniture: number[]; daily: { spun: number } }
+interface ShopInfo { plants: number[]; discovered: number[]; cards: number[]; furniture: number[]; seasons: Season[]; daily: { spun: number } }
 type ShopTab = 'shop' | 'cards' | 'furniture' | 'seasons' | 'plants';
 export async function shopPanel(tab: ShopTab = 'shop') {
   let info: ShopInfo;
@@ -345,8 +372,7 @@ export async function shopPanel(tab: ShopTab = 'shop') {
   } else if (tab === 'furniture') {
     body = `<section class="shop-section"><div class="section-copy"><h3>Bedroom furniture</h3><p>Buy furniture here. Place it from the Furniture part of your inventory.</p></div><div class="furniture-shop">${FURNITURE.map((f) => { const has = m.furniture.some((x) => x.furniture_id === f.id); return `<article class="shop-item ${has ? 'owned' : ''}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><b>${f.name}</b><span class="price">${ico('coin', 'sm')} ${num(f.price)}</span>${has ? '<span class="owned-label">Owned</span>' : `<button class="btn sm sage" data-furniture-buy="${f.id}">Buy</button>`}</article>`; }).join('')}</div></section>`;
   } else if (tab === 'seasons') {
-    const active = effectiveSeason(u.season, new Date().getMonth());
-    body = `<section class="shop-section season-shop"><div class="section-copy"><h3>Garden seasons</h3><p>Auto follows US seasons. A manual season costs ${SEASON_CHANGE_GEMS} gem. Auto is free.</p></div><div class="season-grid">${SEASONS.map((s) => `<button data-season="${s.value}" class="season-card ${u.season === s.value ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small><em>${s.value === 'auto' ? 'Free' : `${SEASON_CHANGE_GEMS} gem`}</em></button>`).join('')}</div><p class="season-now">Your garden now shows <b>${active}</b>.</p></section>`;
+    body = `<section class="shop-section season-shop"><div class="section-copy"><h3>Garden seasons</h3><p>Buy a manual season here for ${SEASON_CHANGE_GEMS} gem. Select it from the Seasons part of your inventory. Auto is always available.</p></div><div class="season-grid">${SEASONS.filter((s) => s.value !== 'auto').map((s) => { const has = !info.seasons.includes(s.value); return `<article class="season-card ${has ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small>${has ? '<em>Owned</em>' : `<button class="btn sm sage" data-season-buy="${s.value}">${u.is_admin ? 'Get free' : `${SEASON_CHANGE_GEMS} gem`}</button>`}</article>`; }).join('')}</div></section>`;
   }
   const p = openPanel(`<div class="shop-shell">${head}${body}</div>`, 'xwide shop-panel');
   name('shop');
@@ -355,7 +381,7 @@ export async function shopPanel(tab: ShopTab = 'shop') {
   p.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/seed', { plant_id: Number(b.dataset.buy) }), () => { sfx.coin(); toast(`Bought a ${plantById(Number(b.dataset.buy))!.name} seed`); shopPanel(); })));
   p.querySelectorAll<HTMLElement>('[data-card]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/card', { card_id: Number(b.dataset.card) }), () => { sfx.chime(); toast(`${CARDS[Number(b.dataset.card)].name} added to your collection!`, 'reward'); shopPanel(); })));
   p.querySelectorAll<HTMLElement>('[data-furniture-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/furniture', { furniture_id: Number(b.dataset.furnitureBuy) }), () => { sfx.coin(); toast('Furniture added to your inventory', 'reward'); shopPanel('furniture'); })));
-  p.querySelectorAll<HTMLElement>('[data-season]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/me/season', { season: b.dataset.season }), () => { sfx.chime(); toast('Garden season changed', 'reward'); shopPanel('seasons'); })));
+  p.querySelectorAll<HTMLElement>('[data-season-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/season', { season: b.dataset.seasonBuy }), () => { sfx.chime(); toast('Season added to your inventory', 'reward'); shopPanel('seasons'); })));
   p.querySelector('#lootbox')?.addEventListener('click', () => act(async () => { const r = await api.post<{ plant_id: number; rarity: string }>('/api/shop/lootbox'); sfx.chime(); toast(`🎁 ${r.rarity.toUpperCase()}: ${plantById(r.plant_id)!.name} seed!`, 'reward'); }, () => shopPanel()));
   p.querySelector('#buygem')?.addEventListener('click', () => act(() => api.post('/api/shop/gems', { qty: 1 }), () => { sfx.coin(); shopPanel(); }));
   p.querySelector('#spin')?.addEventListener('click', async () => {
@@ -454,7 +480,7 @@ export function waitingOverlay(owner: string | null, cancel?: () => void) {
 }
 /** Garden HUD (own garden): level, plots, next unlock, quick buttons. */
 export function gardenHud(n: number) {
-  const m = me(), lv = level().level, owned = m.plots.length, unlocked = plotsUnlocked(lv);
+  const m = me(), lv = level().level, owned = m.plots.length, unlocked = m.user.is_admin ? n * n : plotsUnlocked(lv);
   let el = document.getElementById('garden-hud');
   if (!el) { el = document.createElement('div'); el.id = 'garden-hud'; overlay().appendChild(el); }
   el.innerHTML = `<b>🌿 Level ${num(lv)} garden</b> <small>${n}×${n} tiles</small><br/>Plots ${num(owned)}/${num(unlocked)}${owned < unlocked ? ` · next ${plotPrice(owned) ? `${ico('coin', 'sm')} ${num(plotPrice(owned))}` : 'free'}` : ` · level ${num(lv + 1)} unlocks more`}${m.user.wither ? `<br/><span style="color:#b55">withering ${m.user.wither}/4 - finish a task today</span>` : ''}
@@ -468,19 +494,19 @@ export function plotDialog(tx: number, ty: number, plot: Plot | null) {
   const m = me(), lv = level().level;
   let html = '';
   if (!plot) {
-    const owned = m.plots.length, unlocked = plotsUnlocked(lv), price = plotPrice(owned);
+    const owned = m.plots.length, unlocked = m.user.is_admin ? gardenTiles(lv) ** 2 : plotsUnlocked(lv), price = m.user.is_admin ? 0 : plotPrice(owned);
     const need = Math.ceil((owned + 1 - 4) / 2) + 1;
     html = owned >= unlocked
       ? `<h2>🌱 Empty ground</h2><p class="sub">All ${unlocked} plots for level ${lv} are in use. Reach level ${need} to unlock more.</p>`
       : `<h2>🌱 Dig a plot here?</h2><p class="sub">Tile ${tx + 1},${ty + 1} · plot ${owned + 1} of ${unlocked} unlocked · ${price ? `costs ${ico('coin', 'sm')} ${num(price)}` : 'free!'}</p><div class="form-actions"><button class="btn sage" id="buy">Dig plot${price ? ` (${price} coins)` : ''}</button></div>`;
   } else if (!plot.plant_id) {
-    const seeds = m.inventory.filter((i) => i.qty > 0);
-    html = `<h2>🌱 Plant a seed</h2><p class="sub">Pick something from your inventory.</p><div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" style="cursor:pointer" data-plant="${pl.id}"><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="nm">${pl.name}</span><span class="qty num">×${s.qty}</span></div>`; }).join('') || '<p class="sub">No seeds. Visit the shop (Q).</p>'}</div>`;
+    const seeds = m.user.is_admin ? PLANTS.map((p) => ({ plant_id: p.id, qty: Infinity })) : m.inventory.filter((i) => i.qty > 0);
+    html = `<h2>🌱 Plant a seed</h2><p class="sub">Pick something from your inventory.</p><div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<button class="slot seed" data-plant="${pl.id}"><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="nm">${pl.name}</span><span class="qty num">×${m.user.is_admin ? '∞' : s.qty}</span></button>`; }).join('') || '<p class="sub">No seeds. Visit the shop (Q).</p>'}</div>`;
   } else {
     const pl = plantById(plot.plant_id)!, stage = ['Seed', 'Sprout', 'Growing', 'Mature'][plot.stage];
     const growing = plot.ready_at && plot.ready_at > Date.now();
     html = `<h2>${pl.name}</h2><p class="sub">${stage} · stage ${plot.stage}/${STAGES}${m.user.wither ? ` · withering ${m.user.wither}/4 - complete tasks to revive` : ''}</p>
-      <div style="text-align:center"><img src="${plot.stage >= 3 ? `/assets/plants/plant_${pl.sprite}.png` : `/assets/tiles/crop_${plot.stage}.png`}" style="height:96px" alt="" /></div>
+      <div style="text-align:center"><img src="/assets/plants/plant_${pl.sprite}.png" style="height:${[34, 52, 72, 96][plot.stage]}px" alt="" /></div>
       ${growing ? `<p class="sub" style="text-align:center">Growing... ready in ${fmtMs(plot.ready_at! - Date.now())}</p>`
         : plot.stage >= STAGES ? '<p class="sub" style="text-align:center">Fully grown. Looking good!</p>'
         : `<div class="form-actions"><button class="btn sage" id="feed">🌾 Feed (${growthCost(plot.stage, m.user.growth)} coins) · grows in ${fmtMs(growthMs(plot.stage, m.user.growth))}</button></div>`}

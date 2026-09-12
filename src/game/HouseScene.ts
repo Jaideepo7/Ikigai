@@ -2,7 +2,7 @@ import Phaser from 'phaser';
 import { Player, makeKeys, readInput, typingInDom } from './Player';
 import { me, level } from '../state';
 import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint } from '../ui/panels';
-import { CARDS, caseSlots } from '../shared/rules';
+import { CARDS, FURNITURE, caseSlots } from '../shared/rules';
 import { T, W, H, INNER, layerFrom, block, tile, solidRect } from './tiles';
 import { goto } from './index';
 
@@ -19,13 +19,14 @@ export class HouseScene extends Phaser.Scene {
   player!: Player;
   keys!: Record<string, Phaser.Input.Keyboard.Key>;
   private cardSprites: Phaser.GameObjects.GameObject[] = [];
+  private furnitureSprites: Phaser.GameObjects.GameObject[] = [];
   private spots: { kind: Spot; x1: number; y1: number; x2: number; y2: number }[] = [];
   private exiting = false;
   private ready = false;
   constructor() { super('House'); }
 
   create(data: { spawn?: 'center' | 'door' | 'friends' }) {
-    this.ready = false; this.exiting = false; this.cardSprites = []; this.spots = [];
+    this.ready = false; this.exiting = false; this.cardSprites = []; this.furnitureSprites = []; this.spots = [];
     // ---- floor + walls ----
     const grid: number[][] = [];
     for (let r = 0; r < ROWS; r++) {
@@ -44,7 +45,7 @@ export class HouseScene extends Phaser.Scene {
     layerFrom(this, 'inner_img', grid, OX, OY, -10);
     this.add.rectangle(0, 0, W, H, 0x0b0f0a).setOrigin(0).setDepth(-20);
     // wall decor
-    block(this, 'inner', 40, INNER.window, px(7), py(2), -5); block(this, 'inner', 40, INNER.window, px(13), py(2), -5);
+    block(this, 'inner', 40, INNER.window, px(7), py(2), -5).setName('home-window-left'); block(this, 'inner', 40, INNER.window, px(13), py(2), -5).setName('home-window-right');
     block(this, 'inner', 40, INNER.painting, px(10.5), py(2), -5);
     block(this, 'inner', 40, INNER.door, px(COLS - 0.5), py(8), py(8)); // friends door on the right wall
     this.add.text(px(COLS - 0.5), py(8) + 6, 'friends', { fontFamily: 'Pixelify Sans', fontSize: '13px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
@@ -80,10 +81,11 @@ export class HouseScene extends Phaser.Scene {
     this.input.keyboard!.on('keydown-E', () => { if (!isPanelOpen() && !typingInDom()) this.interact(); });
     this.input.keyboard!.on('keydown-F', () => { if (!isPanelOpen() && !typingInDom()) this.player.emote('wave'); });
     this.drawCards();
+    this.drawFurniture();
     setHint('WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, shelf = cards · F wave · bottom door = garden · right door = friends');
     this.ready = true;
   }
-  onMe() { if (this.ready) this.drawCards(); }
+  onMe() { if (this.ready) { this.drawCards(); this.drawFurniture(); } }
   private spotAt(): Spot | null {
     const { x, y } = this.player;
     return this.spots.find((s) => x > s.x1 && x < s.x2 && y > s.y1 && y < s.y2)?.kind ?? null;
@@ -109,6 +111,27 @@ export class HouseScene extends Phaser.Scene {
       const card = CARDS[c.card_id];
       if (card.art) this.cardSprites.push(this.add.image(x, y, `card_${card.id}`).setDisplaySize(36, 32).setDepth(py(4) + 3));
       else this.cardSprites.push(this.add.text(x, y, card.name.split(' ').map((w) => w[0]).join(''), { fontFamily: 'Pixelify Sans', fontSize: '15px', color: '#F0EBCC' }).setOrigin(0.5).setDepth(py(4) + 3));
+    }
+  }
+
+  /** Draw the four room slots from the Furniture part of the inventory. */
+  private drawFurniture() {
+    this.furnitureSprites.forEach((s) => s.destroy()); this.furnitureSprites = [];
+    const positions = [[5.5, 8.5], [8, 6], [12.5, 10.5], [16.5, 8.5]] as const;
+    for (const owned of me().furniture.filter((f) => f.slot !== null)) {
+      const item = FURNITURE.find((f) => f.id === owned.furniture_id);
+      const pos = positions[owned.slot!];
+      if (!item || !pos) continue;
+      const [c, r] = pos;
+      let object: Phaser.GameObjects.GameObject;
+      if (item.kind === 'plant') object = tile(this, 'inner', INNER.plant, px(c), py(r));
+      else if (item.kind === 'chair') object = tile(this, 'inner', INNER.chair, px(c), py(r));
+      else {
+        const blocks = { dresser: INNER.dresser, rug: INNER.rug, bookcase: INNER.bookshelf, sideboard: INNER.sideboard };
+        object = block(this, 'inner', 40, blocks[item.kind], px(c), py(r), item.kind === 'rug' ? -7 : undefined);
+      }
+      object.setName(`room-furniture-${owned.slot}`);
+      this.furnitureSprites.push(object);
     }
   }
 

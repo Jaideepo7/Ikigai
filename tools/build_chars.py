@@ -1,10 +1,12 @@
 """Character spritesheets v2 from the three team sheets in design/ (front, back, back-walk).
 
 Output public/assets/chars/char_{i}.png, 96x140 frames, 12 frames:
-  0-1  idle down   (front, front "breath")
-  2-3  idle up     (back, back "breath")
-  4-7  walk up     (from the walk sheet)
-  8-11 walk down/side (front with a synthesized leg shuffle; side = flipX in code)
+  0-1   idle down
+  2-3   walk down
+  4-5   idle up
+  6-7   walk up
+  8-9   idle side
+  10-11 walk side
 Also public/assets/chars/portrait_{i}.png (160x240) and public/assets/ui/icon_*.png pixel icons.
 Run: python tools/build_chars.py
 """
@@ -73,7 +75,15 @@ for i in range(24):
     f = fit(tight(front[i]), FW, FH, H_CHAR)
     b = fit(tight(back[i]), FW, FH, H_CHAR)
     w = walk_frames(groups[walk_index(i)])
-    frames = [f, breath(f), b, breath(b)] + w + [shuffle(f, -3, 1), shuffle(f, 0, 0), shuffle(f, 3, 1), shuffle(f, 0, 0)]
+    side = w[1]
+    frames = [
+        f, breath(f),
+        shuffle(f, -3, 1), shuffle(f, 3, 1),
+        b, breath(b),
+        w[0], w[2],
+        side, breath(side),
+        w[1], w[3],
+    ]
     sheet = Image.new('RGBA', (FW * len(frames), FH), (0, 0, 0, 0))
     for j, fr in enumerate(frames): sheet.paste(fr, (j * FW, 0))
     sheet.save(OUT + f'chars/char_{i}.png')

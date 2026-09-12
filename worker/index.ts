@@ -73,22 +73,23 @@ async function loadUser(db: D1Database, token: string | undefined): Promise<User
 }
 function publicUser(u: UserRow) {
   const { pass_hash: _p, salt: _s, ...rest } = u;
-  return u.is_admin ? { ...rest, coins: 999999, gems: 999999 } : rest;
+  return u.is_admin ? { ...rest, coins: 999999, gems: 999999, xp: 999999 } : rest;
 }
 async function meResponse(db: D1Database, u: UserRow, today: string) {
   await settlePlots(db, u.id, Date.now());
-  const [plots, inventory, cards, furniture, folders, stats, tasks] = await Promise.all([
+  const [plots, inventory, cards, furniture, folders, seasons, stats, tasks] = await Promise.all([
     db.prepare('SELECT id,tx,ty,plant_id,stage,ready_at FROM plots WHERE user_id=? ORDER BY id').bind(u.id).all(),
     db.prepare('SELECT plant_id,qty FROM inventory WHERE user_id=?').bind(u.id).all(),
     db.prepare('SELECT card_id,slot FROM cards WHERE user_id=?').bind(u.id).all(),
     db.prepare('SELECT furniture_id,slot FROM furniture WHERE user_id=?').bind(u.id).all(),
     db.prepare('SELECT name FROM task_folders WHERE user_id=? ORDER BY name').bind(u.id).all<{ name: string }>(),
+    db.prepare('SELECT season FROM owned_seasons WHERE user_id=? ORDER BY season').bind(u.id).all<{ season: Season }>(),
     db.prepare('SELECT key,value FROM stats WHERE user_id=?').bind(u.id).all<{ key: string; value: number }>(),
     db.prepare('SELECT * FROM tasks WHERE user_id=? AND completed_at IS NULL ORDER BY COALESCE(due_date,\'9999-12-31\'), priority DESC, created_at DESC').bind(u.id).all(),
   ]);
   const daily = await getDaily(db, u.id, today);
   const freezesLeft = u.freeze_month === today.slice(0, 7) ? Math.max(0, FREEZES_PER_MONTH - u.freezes_used) : FREEZES_PER_MONTH;
-  return { user: publicUser(u), freezesLeft, plots: plots.results, inventory: inventory.results, cards: cards.results, furniture: furniture.results, folders: folders.results.map((f) => f.name), daily, tasks: tasks.results, stats: Object.fromEntries(stats.results.map((r) => [r.key, r.value])) };
+  return { user: publicUser(u), freezesLeft, plots: plots.results, inventory: inventory.results, cards: cards.results, furniture: furniture.results, folders: folders.results.map((f) => f.name), seasons: seasons.results.map((s) => s.season), daily, tasks: tasks.results, stats: Object.fromEntries(stats.results.map((r) => [r.key, r.value])) };
 }
 
 // ---------- auth ----------
@@ -164,10 +165,9 @@ app.post('/api/me/season', async (c) => {
   const season = String((await c.req.json().catch(() => ({}))).season ?? '') as Season;
   if (!SEASONS.some((s) => s.value === season)) return bad('Choose a valid season');
   if (season === u.season) return c.json({ season, cost: 0 });
-  const cost = season === 'auto' || u.is_admin ? 0 : SEASON_CHANGE_GEMS;
-  if (u.gems < cost) return bad(`Need ${cost} gem`);
-  await c.env.DB.prepare('UPDATE users SET season=?, gems=gems-? WHERE id=?').bind(season, cost, u.id).run();
-  return c.json({ season, cost });
+  if (season !== 'auto' && !(await c.env.DB.prepare('SELECT 1 FROM owned_seasons WHERE user_id=? AND season=?').bind(u.id, season).first())) return bad('Buy this season in the shop first');
+  await c.env.DB.prepare('UPDATE users SET season=? WHERE id=?').bind(season, u.id).run();
+  return c.json({ season });
 });
 /** Freeze / unfreeze the garden. Freezing spends one of FREEZES_PER_MONTH; unfreezing is free. */
 app.post('/api/me/freeze', async (c) => {
@@ -262,20 +262,21 @@ app.post('/api/pomodoro/complete', async (c) => {
 // ---------- garden ----------
 app.get('/api/garden/:id', async (c) => {
   const me = c.get('user'), id = Number(c.req.param('id'));
-  const owner = await c.env.DB.prepare('SELECT id,username,character,xp,wither,frozen,season FROM users WHERE id=?').bind(id).first<any>();
+  const owner = await c.env.DB.prepare('SELECT id,username,character,xp,wither,frozen,season,is_admin FROM users WHERE id=?').bind(id).first<any>();
   if (!owner) return bad('No such garden', 404);
   if (id !== me.id && !(await c.env.DB.prepare("SELECT 1 FROM friends WHERE user_id=? AND friend_id=? AND status='accepted'").bind(me.id, id).first())) return bad('Not friends', 403);
   await settlePlots(c.env.DB, id, Date.now());
   const plots = await c.env.DB.prepare('SELECT id,tx,ty,plant_id,stage,ready_at FROM plots WHERE user_id=? ORDER BY id').bind(id).all();
-  return c.json({ owner: { id: owner.id, username: owner.username, character: owner.character, level: levelFromXp(owner.xp).level, wither: owner.wither, frozen: owner.frozen, season: owner.season }, plots: plots.results });
+  return c.json({ owner: { id: owner.id, username: owner.username, character: owner.character, level: owner.is_admin ? 20 : levelFromXp(owner.xp).level, wither: owner.wither, frozen: owner.frozen, season: owner.season }, plots: plots.results });
 });
 app.post('/api/plots/buy', async (c) => {
   const u = c.get('user'), db = c.env.DB;
   const { tx, ty } = await c.req.json().catch(() => ({}));
-  const n = gardenTiles(levelFromXp(u.xp).level);
+  const userLevel = u.is_admin ? 20 : levelFromXp(u.xp).level;
+  const n = gardenTiles(userLevel);
   if (!Number.isInteger(tx) || !Number.isInteger(ty) || tx < 0 || ty < 0 || tx >= n || ty >= n) return bad('Outside your garden');
   const owned = (await db.prepare('SELECT COUNT(*) AS n FROM plots WHERE user_id=?').bind(u.id).first<{ n: number }>())!.n;
-  if (!u.is_admin && owned >= plotsUnlocked(levelFromXp(u.xp).level)) return bad('Level up to unlock more plots');
+  if (!u.is_admin && owned >= plotsUnlocked(userLevel)) return bad('Level up to unlock more plots');
   const price = u.is_admin ? 0 : plotPrice(owned);
   if (!u.is_admin && u.coins < price) return bad(`Need ${price} coins`);
   if (await db.prepare('SELECT 1 FROM plots WHERE user_id=? AND tx=? AND ty=?').bind(u.id, tx, ty).first()) return bad('Already a plot');
@@ -328,11 +329,13 @@ app.get('/api/shop', async (c) => {
   const discovered = new Set((await c.env.DB.prepare('SELECT plant_id FROM inventory WHERE user_id=?').bind(u.id).all<{ plant_id: number }>()).results.map((r) => r.plant_id));
   const owned = new Set((await c.env.DB.prepare('SELECT card_id FROM cards WHERE user_id=?').bind(u.id).all<{ card_id: number }>()).results.map((r) => r.card_id));
   const furniture = new Set((await c.env.DB.prepare('SELECT furniture_id FROM furniture WHERE user_id=?').bind(u.id).all<{ furniture_id: number }>()).results.map((r) => r.furniture_id));
+  const seasons = new Set((await c.env.DB.prepare('SELECT season FROM owned_seasons WHERE user_id=?').bind(u.id).all<{ season: string }>()).results.map((r) => r.season));
   return c.json({
     plants: PLANTS.filter((p) => u.is_admin || p.rarity !== 'rare' || discovered.has(p.id)).map((p) => p.id),
     discovered: [...discovered],
     cards: CARDS.filter((k) => !owned.has(k.id)).map((k) => k.id),
     furniture: FURNITURE.filter((f) => !furniture.has(f.id)).map((f) => f.id),
+    seasons: SEASONS.filter((s) => s.value !== 'auto' && !seasons.has(s.value)).map((s) => s.value),
     daily: await getDaily(c.env.DB, u.id, c.get('today')),
   });
 });
@@ -402,7 +405,7 @@ app.post('/api/cards/:id/place', async (c) => {
   const { slot } = await c.req.json().catch(() => ({}));
   const id = Number(c.req.param('id'));
   if (!(await db.prepare('SELECT 1 FROM cards WHERE user_id=? AND card_id=?').bind(u.id, id).first())) return bad('Not owned', 404);
-  if (slot !== null && (!Number.isInteger(slot) || slot < 0 || slot >= caseSlots(levelFromXp(u.xp).level))) return bad('No such slot');
+  if (slot !== null && (!Number.isInteger(slot) || slot < 0 || slot >= caseSlots(u.is_admin ? 20 : levelFromXp(u.xp).level))) return bad('No such slot');
   await db.batch([
     db.prepare('UPDATE cards SET slot=NULL WHERE user_id=? AND slot=?').bind(u.id, slot ?? -1),
     db.prepare('UPDATE cards SET slot=? WHERE user_id=? AND card_id=?').bind(slot, u.id, id),
@@ -421,6 +424,18 @@ app.post('/api/shop/furniture', async (c) => {
     db.prepare('INSERT INTO furniture (user_id,furniture_id) VALUES (?,?)').bind(u.id, id),
   ]);
   await bumpStat(db, u.id, 'furniture_bought');
+  return c.json({ ok: true });
+});
+app.post('/api/shop/season', async (c) => {
+  const u = c.get('user'), db = c.env.DB;
+  const season = String((await c.req.json().catch(() => ({}))).season ?? '') as Season;
+  if (season === 'auto' || !SEASONS.some((s) => s.value === season)) return bad('No such season');
+  if (await db.prepare('SELECT 1 FROM owned_seasons WHERE user_id=? AND season=?').bind(u.id, season).first()) return bad('Already owned');
+  if (!u.is_admin && u.gems < SEASON_CHANGE_GEMS) return bad(`Need ${SEASON_CHANGE_GEMS} gem`);
+  await db.batch([
+    db.prepare('UPDATE users SET gems=gems-? WHERE id=?').bind(u.is_admin ? 0 : SEASON_CHANGE_GEMS, u.id),
+    db.prepare('INSERT INTO owned_seasons (user_id,season) VALUES (?,?)').bind(u.id, season),
+  ]);
   return c.json({ ok: true });
 });
 app.post('/api/furniture/:id/place', async (c) => {

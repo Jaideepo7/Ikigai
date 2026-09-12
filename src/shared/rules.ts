@@ -168,7 +168,7 @@ export interface Daily { day: string; xp: number; coins: number; tasks_done: num
 export interface MeResponse {
   user: UserState; plots: Plot[]; inventory: { plant_id: number; qty: number }[]; cards: { card_id: number; slot: number | null }[];
   furniture: { furniture_id: number; slot: number | null }[];
-  folders: string[]; daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
+  folders: string[]; seasons: Season[]; daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
 }
 export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number; season: Season }; plots: Plot[] }
 export interface FriendRow { id: number; username: string; character: number | null; status: 'accepted' | 'incoming' | 'outgoing'; online: boolean; location: string | null }

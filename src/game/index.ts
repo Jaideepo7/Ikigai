@@ -29,9 +29,11 @@ class Boot extends Phaser.Scene {
     for (let i = 0; i < 24; i++) {
       const f = (a: number, b: number) => this.anims.generateFrameNumbers(`char_${i}`, { start: a, end: b });
       this.anims.create({ key: `idle_down_${i}`, frames: f(0, 1), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `idle_up_${i}`, frames: f(2, 3), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_up_${i}`, frames: f(4, 7), frameRate: 9, repeat: -1 });
-      this.anims.create({ key: `walk_down_${i}`, frames: f(8, 11), frameRate: 9, repeat: -1 });
+      this.anims.create({ key: `walk_down_${i}`, frames: f(2, 3), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `idle_up_${i}`, frames: f(4, 5), frameRate: 2, repeat: -1 });
+      this.anims.create({ key: `walk_up_${i}`, frames: f(6, 7), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `idle_side_${i}`, frames: f(8, 9), frameRate: 2, repeat: -1 });
+      this.anims.create({ key: `walk_side_${i}`, frames: f(10, 11), frameRate: 7, repeat: -1 });
     }
     this.scene.start('House', { spawn: 'center' });
   }
