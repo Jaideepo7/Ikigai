@@ -3,8 +3,8 @@ import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { Net, type PeerState } from './net';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
-import { isPanelOpen, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud } from '../ui/panels';
-import { TILE, gardenTiles, plantById, WITHER_MAX, type Plot, type GardenView } from '../shared/rules';
+import { isPanelOpen, isPomodoroActive, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud } from '../ui/panels';
+import { TILE, gardenTiles, plantById, WITHER_MAX, effectiveSeason, type GardenSeason, type Plot, type GardenView } from '../shared/rules';
 import { T, W, H, TT, layerFrom, tile, solidRect } from './tiles';
 
 
@@ -34,6 +34,7 @@ export class GardenScene extends Phaser.Scene {
   private ready = false;
   private doorX = 0; private doorY = 0;
   private chatEl?: HTMLDivElement;
+  private shownSeason?: GardenSeason;
   constructor() { super('Garden'); }
 
   async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
@@ -41,7 +42,7 @@ export class GardenScene extends Phaser.Scene {
     this.ownerId = data.ownerId;
     const own = this.ownerId === me().user.id;
     this.view = own
-      ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen }, plots: me().plots }
+      ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season }, plots: me().plots }
       : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
     if (!this.view) return this.scene.start('House', { spawn: 'center' });
 
@@ -102,7 +103,7 @@ export class GardenScene extends Phaser.Scene {
     const taken = new Set<string>();
     const free = (c: number, r: number) => !taken.has(`${c},${r}`) && !(r >= houseR0 - 1 && r <= houseR0 + HOUSE_H && c >= houseC0 - 1 && c <= houseC0 + HOUSE_W) && !(r >= fenceR0 - 1 && r <= fenceR1 + 1 && c >= fenceC0 - 1 && c <= fenceC1 + 1) && !(c === cx && r <= fenceR0);
     for (let i = 0; i < this.cols * this.rows * 0.05; i++) {
-      const c = rnd.between(0, this.cols - 1), r = rnd.between(0, this.rows - 1);
+      const c = rnd.between(1, this.cols - 2), r = rnd.between(1, this.rows - 2);
       if (!free(c, r)) continue;
       taken.add(`${c},${r}`);
       const k = rnd.frac();
@@ -112,6 +113,7 @@ export class GardenScene extends Phaser.Scene {
     prop(TT.beehive, houseC0 + HOUSE_W + 1, houseR0 + HOUSE_H, 40); prop(TT.sign, cx + 2, fenceR0 - 1);
     prop(TT.pot, cx - 2, houseR0 + HOUSE_H); prop(TT.hay, houseC0 - 2, houseR0 + HOUSE_H, 40);
     for (let i = 0; i < 8; i++) { const c = rnd.between(fenceC0 + 1, fenceC1 - 1), r = rnd.between(this.gr0, fenceR1 - 1); if (rnd.frac() < 0.5) this.add.image(this.ox + (c + rnd.frac()) * T, this.oy + (r + rnd.frac()) * T, 'flower').setDepth(-9); }
+    this.applySeason(effectiveSeason(this.view.owner.season, new Date().getMonth()));
 
     // ---- plots + player ----
     this.plotLayer = this.add.container(0, 0);
@@ -123,7 +125,7 @@ export class GardenScene extends Phaser.Scene {
     this.physics.add.collider(this.player, walls);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.keys = makeKeys(this);
-    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !typingInDom() && !this.chatEl) fn(); };
+    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !isPomodoroActive() && !typingInDom() && !this.chatEl) fn(); };
     if (own) this.input.keyboard!.on('keydown-E', guarded(() => this.interact()));
     this.input.keyboard!.on('keydown-F', guarded(() => { this.player.emote('wave'); this.net?.emote('wave'); }));
     this.input.keyboard!.on('keydown-ENTER', guarded(() => this.openChat()));
@@ -137,7 +139,9 @@ export class GardenScene extends Phaser.Scene {
   onMe() {
     if (!this.ready || this.ownerId !== me().user.id) return;
     if (gardenTiles(level().level) !== this.n) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; } // levelled up: the fence moves out
-    this.view.plots = me().plots; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen;
+    const nextSeason = effectiveSeason(me().user.season, new Date().getMonth());
+    if (nextSeason !== this.shownSeason) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; }
+    this.view.plots = me().plots; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen; this.view.owner.season = me().user.season;
     this.drawPlots(); gardenHud(this.n);
   }
 
@@ -164,7 +168,7 @@ export class GardenScene extends Phaser.Scene {
       if (!p.plant_id) continue;
       const plant = plantById(p.plant_id)!;
       const cx = x + T / 2, by = y + T - 4;
-      const im = p.stage >= 3 ? this.add.image(cx, by, `plant_${plant.sprite}`).setOrigin(0.5, 1) : this.add.image(cx, by, `crop_${p.stage}`).setOrigin(0.5, 1);
+      const im = this.add.image(cx, by, `plant_${plant.sprite}`).setOrigin(0.5, 1).setScale([0.34, 0.54, 0.76, 1][Math.min(3, p.stage)]);
       im.setDepth(by).setTint(tintHex).setAlpha(1 - wither * 0.3);
       this.plotLayer.add(im);
       if (p.ready_at) {
@@ -179,6 +183,19 @@ export class GardenScene extends Phaser.Scene {
       const t = this.add.text(gx + s / 2, gy + 10, '❄ FROZEN ❄', { fontFamily: 'Pixelify Sans', fontSize: '28px', color: '#e8f6ff', stroke: '#2a5a8a', strokeThickness: 5 }).setOrigin(0.5, 0).setDepth(901);
       this.freeze = this.add.container(0, 0, [r, t]);
     }
+  }
+
+  /** A light screen tint is the full season effect. It does not add or replace art assets. */
+  private applySeason(season: GardenSeason) {
+    this.shownSeason = season;
+    if (season === 'summer') return;
+    const style = {
+      rainy: { color: 0x365f83, alpha: 0.12 },
+      fall: { color: 0xa83d2f, alpha: 0.14 },
+      winter: { color: 0xdce3e5, alpha: 0.18 },
+    }[season];
+    const overlay = this.add.rectangle(W / 2, H / 2, W, H, style.color, style.alpha).setScrollFactor(0).setDepth(1_000_000).setAlpha(0).setName(`season-${season}`);
+    this.tweens.add({ targets: overlay, alpha: 1, duration: 300 });
   }
 
   // ---------- realtime ----------
@@ -231,14 +248,15 @@ export class GardenScene extends Phaser.Scene {
 
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting || !this.player.body) return;
-    const [vx, vy, run] = isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
+    const focusLocked = this.ownerId === me().user.id && isPomodoroActive();
+    const [vx, vy, run] = isPanelOpen() || focusLocked || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving);
     for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
     const now = Date.now();
     for (const t of this.timerTexts) { const ms = (t as any).readyAt - now; t.setText(ms <= 0 ? 'ready!' : fmt(ms)); if (ms <= 0 && !(t as any).refreshed) { (t as any).refreshed = true; refreshMe().catch(() => {}); } }
     const own = this.ownerId === me().user.id;
-    const tileHere = own ? this.tileAt(this.player.x, this.player.y) : null;
+    const tileHere = own && !focusLocked ? this.tileAt(this.player.x, this.player.y) : null;
     this.highlight.setVisible(!!tileHere);
     if (tileHere) this.highlight.setPosition(this.ox + (this.gc0 + tileHere[0] + 0.5) * T, this.oy + (this.gr0 + tileHere[1] + 0.5) * T);
     if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY + 14 && this.player.dir === 'up') {

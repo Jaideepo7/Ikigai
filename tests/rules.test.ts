@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { taskReward, levelFromXp, xpToNext, timingMult, spinPayout, dayKey, daysBetween, addDays, plotPrice, gardenTiles, weightedPick } from '../src/shared/rules.ts';
+import { taskReward, levelFromXp, xpToNext, timingMult, spinPayout, dayKey, daysBetween, addDays, plotPrice, gardenTiles, weightedPick, effectiveSeason } from '../src/shared/rules.ts';
 
 test('reward scales with difficulty, time, timing, pomodoro', () => {
   assert.deepEqual(taskReward(1, 30, null, false), { xp: 15, coins: 8 });      // 10 * 1.5
@@ -33,4 +33,11 @@ test('days', () => {
   assert.equal(daysBetween('2026-09-01', '2026-09-12'), 11);
   assert.equal(weightedPick({ a: 0, b: 1 }, 0.5), 'b');
   assert.equal(weightedPick({ a: 1, b: 1 }, 0.999), 'b');
+});
+test('automatic US seasons', () => {
+  assert.equal(effectiveSeason('auto', 11), 'winter');
+  assert.equal(effectiveSeason('auto', 3), 'rainy');
+  assert.equal(effectiveSeason('auto', 6), 'summer');
+  assert.equal(effectiveSeason('auto', 9), 'fall');
+  assert.equal(effectiveSeason('fall', 0), 'fall');
 });

@@ -11,8 +11,10 @@ req b POST /api/auth/signup "{\"username\":\"$v\",\"password\":\"secret1\"}" | J
 req a POST /api/me/character '{"character":3}' >/dev/null
 [ "$(req a POST /api/me/character '{"character":4}' | J "d['error']")" = "Character already chosen" ]
 tid=$(req a POST /api/tasks '{"name":"Read OS ch4","difficulty":2,"est_minutes":45,"start":true}' | J "d['id']")
+[ "$(req a POST /api/tasks/$tid/complete '{}' | J "d['error']")" = "Finish the focus session before you complete this task" ]
+req a POST /api/pomodoro/complete "{\"task_id\":$tid,\"minutes\":25}" | J "d['ok']" >/dev/null
 r=$(req a POST /api/tasks/$tid/complete '{}'); echo "complete: $r"
-[ "$(echo "$r" | J "d['xp']")" = "32" ]  # 20*1.75*0.9 (1 min actual vs 45 est = rushed) = 31.5 -> 32
+[ "$(echo "$r" | J "d['xp']")" = "64" ]  # 20*1.75*0.9 (1 min actual vs 45 est = rushed) = 31.5 -> 32, doubled for pomodoro
 [ "$(echo "$r" | J "d['streak']")" = "1" ]
 me=$(req a GET /api/me); echo "$me" | J "'coins',d['user']['coins'],'xp',d['user']['xp'],'daily',d['daily']"
 [ "$(echo "$me" | J "d['user']['coins']")" = "116" ]   # 100 + 16
@@ -44,8 +46,8 @@ req b POST /api/friends/accept "{\"user_id\":$aid}" | J "d['ok']" >/dev/null
 req a GET /api/garden/$bid | J "'garden of',d['owner']['username'],len(d['plots']),'plots'"
 # settings + pomodoro + logout
 [ "$(req a POST /api/me/settings '{"frozen":1,"pomo_work":50}' | J "d['pomo_work']")" = "50" ]
-req a POST /api/pomodoro/complete "{\"task_id\":$tid,\"minutes\":25}" | J "d['ok']" >/dev/null
-[ "$(req a GET /api/me | J "d['stats']['pomodoros']")" = "1" ]
+req a POST /api/pomodoro/complete '{"minutes":25}' | J "d['ok']" >/dev/null
+[ "$(req a GET /api/me | J "d['stats']['pomodoros']")" = "2" ]
 req a POST /api/auth/logout >/dev/null
 [ "$(req a GET /api/me | J "d['error']")" = "Not signed in" ]
 echo "ALL SMOKE TESTS PASSED"

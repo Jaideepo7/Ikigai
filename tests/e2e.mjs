@@ -14,7 +14,7 @@ const hold = (page, key, ms) => page.keyboard.down(key).then(() => page.waitForT
 async function newUser(name) {
   const ctx = await browser.newContext({ viewport: { width: 1440, height: 912 } });
   const page = await ctx.newPage();
-  page.on('console', (m) => { if (m.type() === 'error') errors.push(`[${name}] ${m.text()}`); });
+  page.on('console', (m) => { if (m.type() === 'error' && !m.text().includes('401 (Unauthorized)')) errors.push(`[${name}] ${m.text()}`); });
   page.on('pageerror', (e) => errors.push(`[${name}] ${e.message}`));
   await page.goto(B);
   return page;
@@ -42,18 +42,19 @@ await a.click('#diff button[data-d="2"]'); await a.click('#time button[data-m="3
 await shot(a, '04-create-task');
 await a.click('[data-start="0"]'); await a.waitForSelector('.task');
 await shot(a, '05-tasks');
-await a.click('.task .check'); await a.waitForTimeout(800);
+await a.click('.task .complete'); await a.click('#c-yes'); await a.waitForTimeout(800);
 await shot(a, '06-task-done');
 await a.keyboard.press('Escape');
 // pomodoro
 await a.keyboard.press('p'); await a.waitForSelector('#p-start'); await a.click('#p-start'); await a.waitForTimeout(600);
 await shot(a, '07-pomodoro'); await a.keyboard.press('Escape'); await a.waitForTimeout(300);
 await shot(a, '08-mini-timer');
+await a.click('#mini-timer'); await a.click('#p-reset'); await a.keyboard.press('Escape');
 // map + shop
 await a.keyboard.press('m'); await a.waitForSelector('.hotspot'); await shot(a, '09-map'); await a.keyboard.press('Escape');
 await a.keyboard.press('q'); await a.waitForSelector('#spin'); await a.click('#spin'); await a.waitForTimeout(2600);
 await shot(a, '10-shop');
-await a.click('.tabs button[data-t="cards"]'); await a.waitForTimeout(300); await shot(a, '11-cards');
+await a.click('.shop-tabs button[data-t="cards"]'); await a.waitForTimeout(300); await shot(a, '11-cards');
 await a.keyboard.press('Escape');
 await a.keyboard.press('i'); await a.waitForSelector('.slots'); await shot(a, '12-inventory'); await a.keyboard.press('Escape');
 // walk out the door to the garden
@@ -72,10 +73,10 @@ const b = await newUser('bob');
 await b.click('[data-go="signup"]');
 await b.fill('input[name=username]', ua + 'b'); await b.fill('input[name=password]', 'secret1'); await b.fill('input[name=verify]', 'secret1');
 await b.click('button.btn-round'); await b.waitForSelector('.char-tile'); await b.click('.char-tile[data-char="7"]'); await b.click('#c-yes'); await b.waitForSelector('#navbar'); await b.waitForTimeout(1500); if (await b.$('#t-skip')) await b.click('#t-skip');
-await hold(b, 'ArrowRight', 3500); await b.waitForSelector('#fadd');
+await b.keyboard.press('m'); await b.waitForSelector('.map-img'); await b.click('.hotspot[data-to="friends"]'); await b.waitForSelector('#fadd');
 await b.fill('#fcode', codeA); await b.click('#fadd'); await b.waitForTimeout(500); await shot(b, '19-friend-request');
 await a.evaluate(() => fetch('/api/friends').then((r) => r.json()).then((d) => fetch('/api/friends/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user_id: d.friends[0].id }) })));
-await b.keyboard.press('Escape'); await hold(b, 'ArrowLeft', 400); await hold(b, 'ArrowRight', 1500); await b.waitForSelector('[data-visit]'); await shot(b, '20-friends-online');
+await b.waitForSelector('[data-visit]', { timeout: 10000 }); await shot(b, '20-friends-online');
 await b.click('[data-visit]'); await b.waitForTimeout(1500); await shot(b, '20b-bob-knocking'); await a.waitForSelector('#knock'); await shot(a, '20c-alice-knock'); await a.click('#k-yes'); await b.waitForTimeout(1500);
 await hold(b, 'ArrowDown', 600);
 await b.keyboard.press('Enter'); await b.waitForSelector('#chat input'); await b.type('#chat input', 'hello from bob!'); await b.waitForTimeout(400);

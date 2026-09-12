@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { HouseScene } from './HouseScene';
 import { GardenScene } from './GardenScene';
-import { mountNavbar, tutorial, confirmDialog } from '../ui/panels';
+import { mountNavbar, tutorial, confirmDialog, isPomodoroActive } from '../ui/panels';
 import { me, on, refreshMe, toast } from '../state';
 import { music, setSfx, unlock, setVolume, setTrack } from '../ui/audio';
 import { api } from '../api';
@@ -29,9 +29,11 @@ class Boot extends Phaser.Scene {
     for (let i = 0; i < 24; i++) {
       const f = (a: number, b: number) => this.anims.generateFrameNumbers(`char_${i}`, { start: a, end: b });
       this.anims.create({ key: `idle_down_${i}`, frames: f(0, 1), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `idle_up_${i}`, frames: f(2, 3), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_up_${i}`, frames: f(4, 7), frameRate: 9, repeat: -1 });
-      this.anims.create({ key: `walk_down_${i}`, frames: f(8, 11), frameRate: 9, repeat: -1 });
+      this.anims.create({ key: `walk_down_${i}`, frames: f(2, 3), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `idle_up_${i}`, frames: f(4, 5), frameRate: 2, repeat: -1 });
+      this.anims.create({ key: `walk_up_${i}`, frames: f(6, 7), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `idle_side_${i}`, frames: f(8, 9), frameRate: 2, repeat: -1 });
+      this.anims.create({ key: `walk_side_${i}`, frames: f(10, 11), frameRate: 7, repeat: -1 });
     }
     this.scene.start('House', { spawn: 'center' });
   }
@@ -61,6 +63,10 @@ export async function startGame() {
 export async function goto(scene: 'House' | 'Garden', data: Record<string, unknown> = {}) {
   const active = game?.scene.getScenes(true)[0];
   if (!active) return;
+  if (scene === 'Garden' && data.ownerId === me().user.id && isPomodoroActive()) {
+    toast('The garden is closed during a focus session', 'err');
+    return;
+  }
   if (scene === 'Garden' && data.ownerId === me().user.id && me().user.frozen) {
     const ok = await confirmDialog('Your farm is frozen', 'You cannot go to your farm when it is frozen. Would you like to unfreeze your farm?', 'Unfreeze', 'Stay inside');
     if (!ok) return;

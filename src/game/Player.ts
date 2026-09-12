@@ -6,7 +6,7 @@ export const WALK = 230, RUN = 380;
 export const FRAME = { w: 96, h: 140 };
 
 /**
- * A gardener sprite. Sheet frames: 0-1 idle down, 2-3 idle up, 4-7 walk up, 8-11 walk down (side = flipX).
+ * A gardener sprite. Each direction has two idle frames and two walk frames. Left uses the mirrored right side.
  * All animation is frame based (no scale/position tweens) so pixels stay crisp and physics owns x/y.
  */
 export class Player extends Phaser.Physics.Arcade.Sprite {
@@ -42,8 +42,9 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     if (dir === this.dir && moving === this.moving && running === this.running) return;
     this.dir = dir; this.moving = moving; this.running = running;
     this.setFlipX(dir === 'left');
-    const key = moving ? (dir === 'up' ? 'walk_up' : 'walk_down') : dir === 'up' ? 'idle_up' : 'idle_down';
-    this.play({ key: `${key}_${this.character}`, frameRate: moving ? (running ? 14 : 9) : 2 }, true);
+    const view = dir === 'left' || dir === 'right' ? 'side' : dir;
+    const key = `${moving ? 'walk' : 'idle'}_${view}_${this.character}`;
+    this.play({ key, frameRate: moving ? (running ? 11 : 7) : 2 }, true);
   }
   preUpdate(t: number, dt: number) {
     super.preUpdate(t, dt);

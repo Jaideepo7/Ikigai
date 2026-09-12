@@ -19,7 +19,7 @@ export const INNER = {
   floor: [IN(1, 4), IN(1, 4), IN(1, 5)], wallTop: IN(2, 0), wall: IN(2, 1), wallL: IN(1, 1), wallR: IN(3, 1), wallBottom: IN(2, 2),
   rug: { x: 0, y: 7, w: 3, h: 3 }, bed: { x: 16, y: 1, w: 2, h: 3 }, bookshelf: { x: 0, y: 11, w: 3, h: 2 }, dresser: { x: 6, y: 9, w: 2, h: 2 },
   table: { x: 10, y: 1, w: 3, h: 3 }, chair: IN(11, 4), stove: { x: 12, y: 10, w: 2, h: 2 }, plant: IN(11, 10), plantTall: { x: 8, y: 12, w: 1, h: 2 },
-  window: { x: 9, y: 4, w: 2, h: 1 }, door: { x: 5, y: 1, w: 1, h: 2 }, painting: { x: 13, y: 0, w: 3, h: 1 }, painting2: { x: 16, y: 0, w: 3, h: 1 }, sideboard: { x: 10, y: 7, w: 3, h: 2 },
+  window: { x: 9, y: 4, w: 2, h: 2 }, door: { x: 5, y: 1, w: 1, h: 2 }, painting: { x: 13, y: 0, w: 3, h: 1 }, painting2: { x: 16, y: 0, w: 3, h: 1 }, sideboard: { x: 10, y: 7, w: 3, h: 2 },
 };
 
 /** Build a tilemap layer from a 2D array of frame indices (-1 = empty). */
