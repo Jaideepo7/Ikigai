@@ -43,22 +43,11 @@ ${nav()}
   <label>Password</label><input name="password" type="password" required minlength="6" placeholder="Enter your password" autocomplete="${kind === 'login' ? 'current-password' : 'new-password'}" />
   ${kind === 'signup' ? '<label>Verify Password</label><input name="verify" type="password" required placeholder="Re-Enter Password" autocomplete="new-password" />' : ''}
   <button class="btn-round" type="submit">${kind === 'login' ? 'Login' : 'Create Account'}</button>
-  <div class="alt">${kind === 'login' ? 'Need an account? <a data-go="signup">Sign Up!</a><br/><a class="admin-link" data-go="admin">Admin Test Login</a>' : 'Have an account? <a data-go="login">Login</a>'}</div>
+  <div class="alt">${kind === 'login' ? 'Need an account? <a data-go="signup">Sign Up!</a>' : 'Have an account? <a data-go="login">Login</a>'}</div>
   <div class="err"></div>
 </form></div>`;
 export const loginScreen = () => authForm('login');
 export const signupScreen = () => authForm('signup');
-export const adminScreen = () => `
-${nav()}
-<div class="auth-wrap grid-bg"><form class="auth-card admin-auth" data-auth="admin">
-  <span class="admin-badge">TEST MODE</span><h1>Admin Login</h1>
-  <p class="auth-note">Use the username <b>admin</b>. This account has unlimited test resources.</p>
-  <input name="username" type="hidden" value="admin" />
-  <label>Password</label><input name="password" type="password" required minlength="6" placeholder="Enter your admin password" autocomplete="current-password" />
-  <button class="btn-round" type="submit" name="action" value="login">Login as Admin</button>
-  <button class="admin-create" type="submit" name="action" value="signup">Create Admin Account</button>
-  <div class="alt"><a data-go="login">Back to Login</a></div><div class="err"></div>
-</form></div>`;
 
 export const selectScreen = () => {
   queueMicrotask(wireSelect);

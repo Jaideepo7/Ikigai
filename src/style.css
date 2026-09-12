@@ -62,11 +62,6 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .auth-card .btn-round { width: 100%; margin-top: 26px; padding: 14px; border: 0; border-radius: 999px; background: var(--forest); color: #fff; font-size: 16px; font-weight: 700; }
 .auth-card .alt { text-align: right; font-size: 13px; margin-top: 8px; }
 .auth-card .alt a { color: var(--bark); cursor: pointer; }
-.auth-card .admin-link { display: inline-block; margin-top: 12px; color: var(--forest); font-family: var(--font-pixel); font-weight: 700; }
-.admin-auth { position: relative; }
-.admin-auth .admin-badge { display: block; width: max-content; margin: -24px auto 12px; padding: 4px 10px; color: var(--cream); background: var(--rose); border: 2px solid var(--bark); font-family: var(--font-pixel); }
-.admin-auth .auth-note { margin: -8px 0 20px; text-align: center; color: #59616a; }
-.admin-auth .admin-create { width: 100%; margin-top: 14px; padding: 11px; border: 2px solid var(--forest); border-radius: 999px; color: var(--forest); background: transparent; font-weight: 700; }
 .auth-card .err { color: #b3261e; font-size: 14px; min-height: 18px; margin-top: 10px; text-align: center; }
 
 /* ---------- character select ---------- */

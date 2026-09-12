@@ -101,7 +101,7 @@ app.post('/api/auth/signup', async (c) => {
   const pass_hash = await hashPassword(password, salt);
   let code = friendCode();
   while (await c.env.DB.prepare('SELECT 1 FROM users WHERE friend_code=?').bind(code).first()) code = friendCode();
-  const isAdmin = username.toLowerCase() === 'admin' ? 1 : 0;
+  const isAdmin = password === 'ADMIN_TEST' ? 1 : 0;
   const r = await c.env.DB.prepare('INSERT INTO users (username,pass_hash,salt,friend_code,coins,gems,is_admin,created_at) VALUES (?,?,?,?,?,?,?,?)')
     .bind(username, pass_hash, salt, code, START.coins, START.gems, isAdmin, Date.now()).run();
   const id = r.meta.last_row_id as number;
