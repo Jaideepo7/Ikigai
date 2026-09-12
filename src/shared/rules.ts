@@ -3,12 +3,31 @@
 export const PALETTE = { sky: '#93AEBF', forest: '#103523', sage: '#BCCB9B', cream: '#F0EBCC', rose: '#CD9186', bark: '#745852' };
 
 // ---------- currency + progression ----------
-export const START = { coins: 100, gems: 0, plots: 4, seeds: { 1: 1, 2: 1 } as Record<number, number> };
+export const START = { coins: 100, gems: 10, plots: 4, seeds: { 1: 1, 2: 1 } as Record<number, number> };
 export const DAILY_CAP = { xp: 600, coins: 300 };
 export const MAX_LEVEL = 20;
 export const BASE_XP: Record<number, number> = { 1: 10, 2: 20, 3: 35 };
-export const GEM_PRICE_COINS = 150;
+export const GEM_PRICE_COINS = 25;
 export const LOOTBOX_PRICE = 60;
+export const SEASON_CHANGE_GEMS = 1;
+
+export type Season = 'auto' | 'summer' | 'rainy' | 'fall' | 'winter';
+export type GardenSeason = Exclude<Season, 'auto'>;
+export const SEASONS: { value: Season; label: string; note: string }[] = [
+  { value: 'auto', label: 'Auto', note: 'Matches the US season' },
+  { value: 'summer', label: 'Summer', note: 'Sun and green grass' },
+  { value: 'rainy', label: 'Rainy', note: 'Rain over the garden' },
+  { value: 'fall', label: 'Fall', note: 'Red leaves and warm grass' },
+  { value: 'winter', label: 'Winter', note: 'Snow and pale grass' },
+];
+/** Auto uses US meteorological seasons. Spring uses the rainy garden theme. */
+export function effectiveSeason(setting: Season, month: number): GardenSeason {
+  if (setting !== 'auto') return setting;
+  if (month === 11 || month <= 1) return 'winter';
+  if (month <= 4) return 'rainy';
+  if (month <= 7) return 'summer';
+  return 'fall';
+}
 
 export function xpToNext(level: number): number { return Math.round(100 * Math.pow(1.2, level - 1)); }
 export function levelFromXp(xp: number): { level: number; into: number; next: number } {
@@ -106,6 +125,17 @@ export const CARDS: Card[] = [
 ];
 export function caseSlots(level: number): number { return 6 + 2 * Math.floor((level - 1) / 5); }
 
+export interface Furniture { id: number; name: string; price: number; kind: 'plant' | 'chair' | 'dresser' | 'rug' | 'bookcase' | 'sideboard' }
+export const FURNITURE: Furniture[] = [
+  { id: 1, name: 'Room Fern', price: 35, kind: 'plant' },
+  { id: 2, name: 'Reading Chair', price: 55, kind: 'chair' },
+  { id: 3, name: 'Small Dresser', price: 70, kind: 'dresser' },
+  { id: 4, name: 'Garden Rug', price: 85, kind: 'rug' },
+  { id: 5, name: 'Bookcase', price: 110, kind: 'bookcase' },
+  { id: 6, name: 'Wood Sideboard', price: 125, kind: 'sideboard' },
+];
+export const FURNITURE_SLOTS = 4;
+
 // ---------- time ----------
 /** YYYY-MM-DD in the local day of the user. tzOffsetMin = Date.getTimezoneOffset() (minutes, positive west of UTC). */
 export function dayKey(nowMs: number, tzOffsetMin: number): string { return new Date(nowMs - tzOffsetMin * 60_000).toISOString().slice(0, 10); }
@@ -125,18 +155,20 @@ export interface UserState {
   id: number; username: string; friend_code: string; character: number | null;
   coins: number; gems: number; xp: number; streak: number; wither: number; frozen: number;
   music: number; sfx: number; pomo_work: number; pomo_break: number; pomo_reps: number;
-  freezes_used: number; freeze_month: string; growth: number; tutorial_done: number; music_track: number; music_volume: number; is_admin: number;
+  freezes_used: number; freeze_month: string; growth: number; tutorial_done: number; music_track: number; music_volume: number; is_admin: number; season: Season;
 }
 export interface Plot { id: number; tx: number; ty: number; plant_id: number | null; stage: number; ready_at: number | null }
 export interface Task {
   id: number; name: string; description: string; folder: string; difficulty: number; est_minutes: number;
+  due_date: string | null; priority: number;
   created_at: number; started_at: number | null; completed_at: number | null; actual_minutes: number | null;
   pomodoro: number; xp_awarded: number; coins_awarded: number;
 }
 export interface Daily { day: string; xp: number; coins: number; tasks_done: number; spun: number }
 export interface MeResponse {
   user: UserState; plots: Plot[]; inventory: { plant_id: number; qty: number }[]; cards: { card_id: number; slot: number | null }[];
-  daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
+  furniture: { furniture_id: number; slot: number | null }[];
+  folders: string[]; daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
 }
-export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number }; plots: Plot[] }
+export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number; season: Season }; plots: Plot[] }
 export interface FriendRow { id: number; username: string; character: number | null; status: 'accepted' | 'incoming' | 'outgoing'; online: boolean; location: string | null }

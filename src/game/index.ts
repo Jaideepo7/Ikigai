@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { HouseScene } from './HouseScene';
 import { GardenScene } from './GardenScene';
-import { mountNavbar, tutorial, confirmDialog } from '../ui/panels';
+import { mountNavbar, tutorial, confirmDialog, isPomodoroActive } from '../ui/panels';
 import { me, on, refreshMe, toast } from '../state';
 import { music, setSfx, unlock, setVolume, setTrack } from '../ui/audio';
 import { api } from '../api';
@@ -61,6 +61,10 @@ export async function startGame() {
 export async function goto(scene: 'House' | 'Garden', data: Record<string, unknown> = {}) {
   const active = game?.scene.getScenes(true)[0];
   if (!active) return;
+  if (scene === 'Garden' && data.ownerId === me().user.id && isPomodoroActive()) {
+    toast('The garden is closed during a focus session', 'err');
+    return;
+  }
   if (scene === 'Garden' && data.ownerId === me().user.id && me().user.frozen) {
     const ok = await confirmDialog('Your farm is frozen', 'You cannot go to your farm when it is frozen. Would you like to unfreeze your farm?', 'Unfreeze', 'Stay inside');
     if (!ok) return;

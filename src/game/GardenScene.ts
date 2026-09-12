@@ -3,7 +3,7 @@ import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { Net, type PeerState } from './net';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
-import { isPanelOpen, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud } from '../ui/panels';
+import { isPanelOpen, isPomodoroActive, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud } from '../ui/panels';
 import { TILE, gardenTiles, plantById, WITHER_MAX, type Plot, type GardenView } from '../shared/rules';
 import { T, W, H, TT, layerFrom, tile, solidRect } from './tiles';
 
@@ -123,7 +123,7 @@ export class GardenScene extends Phaser.Scene {
     this.physics.add.collider(this.player, walls);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.keys = makeKeys(this);
-    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !typingInDom() && !this.chatEl) fn(); };
+    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !isPomodoroActive() && !typingInDom() && !this.chatEl) fn(); };
     if (own) this.input.keyboard!.on('keydown-E', guarded(() => this.interact()));
     this.input.keyboard!.on('keydown-F', guarded(() => { this.player.emote('wave'); this.net?.emote('wave'); }));
     this.input.keyboard!.on('keydown-ENTER', guarded(() => this.openChat()));
@@ -231,14 +231,15 @@ export class GardenScene extends Phaser.Scene {
 
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting || !this.player.body) return;
-    const [vx, vy, run] = isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
+    const focusLocked = this.ownerId === me().user.id && isPomodoroActive();
+    const [vx, vy, run] = isPanelOpen() || focusLocked || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving);
     for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
     const now = Date.now();
     for (const t of this.timerTexts) { const ms = (t as any).readyAt - now; t.setText(ms <= 0 ? 'ready!' : fmt(ms)); if (ms <= 0 && !(t as any).refreshed) { (t as any).refreshed = true; refreshMe().catch(() => {}); } }
     const own = this.ownerId === me().user.id;
-    const tileHere = own ? this.tileAt(this.player.x, this.player.y) : null;
+    const tileHere = own && !focusLocked ? this.tileAt(this.player.x, this.player.y) : null;
     this.highlight.setVisible(!!tileHere);
     if (tileHere) this.highlight.setPosition(this.ox + (this.gc0 + tileHere[0] + 0.5) * T, this.oy + (this.gr0 + tileHere[1] + 0.5) * T);
     if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY + 14 && this.player.dir === 'up') {

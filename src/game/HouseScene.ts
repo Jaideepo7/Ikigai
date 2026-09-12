@@ -1,7 +1,7 @@
 import Phaser from 'phaser';
 import { Player, makeKeys, readInput, typingInDom } from './Player';
 import { me, level } from '../state';
-import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, setHint } from '../ui/panels';
+import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint } from '../ui/panels';
 import { CARDS, caseSlots } from '../shared/rules';
 import { T, W, H, INNER, layerFrom, block, tile, solidRect } from './tiles';
 import { goto } from './index';
@@ -124,6 +124,11 @@ export class HouseScene extends Phaser.Scene {
   }
   private async leaveToGarden() {
     const data = { ownerId: me().user.id, spawn: 'porch' };
+    if (isPomodoroActive()) {
+      this.player.setVelocity(0, 0); this.player.y = py(ROWS) - 70; this.player.setFacing('up', false);
+      this.exiting = false;
+      return;
+    }
     if (me().user.frozen) {
       // goto() shows the unfreeze dialog; if the user declines, step back inside
       this.player.setVelocity(0, 0); this.player.y = py(ROWS) - 70; this.player.setFacing('up', false);

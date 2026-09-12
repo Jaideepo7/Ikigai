@@ -4,7 +4,8 @@ import { goto } from '../game';
 import { sfx, music, setSfx, setVolume, setTrack, TRACKS } from './audio';
 import {
   DAILY_CAP, PLANTS, CARDS, plantById, previewReward, plotsUnlocked, plotPrice, STAGES, caseSlots, gardenTiles,
-  LOOTBOX_PRICE, GEM_PRICE_COINS, FREEZES_PER_MONTH, GROWTH_OPTIONS, growthCost, growthMs, spinBaseCoins, type Task, type Plot, type FriendRow, type Reel,
+  LOOTBOX_PRICE, GEM_PRICE_COINS, FREEZES_PER_MONTH, GROWTH_OPTIONS, growthCost, growthMs, spinBaseCoins, addDays,
+  FURNITURE, FURNITURE_SLOTS, SEASONS, SEASON_CHANGE_GEMS, effectiveSeason, type Season, type Task, type Plot, type FriendRow, type Reel,
 } from '../shared/rules';
 
 /** Escape user-supplied text before it goes into innerHTML. */
@@ -50,7 +51,7 @@ export function confirmDialog(title: string, body: string, yes = 'Yes', no = 'Ca
     panelEl!.querySelector('.x')!.addEventListener('click', () => resolve(false));
   });
 }
-const dailyBar = () => { const d = me().daily; const pct = Math.min(100, Math.round((d.xp / DAILY_CAP.xp) * 100)); return `<div class="daily"><div class="row"><span>${ico('streak')} Daily progress ${pct < 100 ? (pct < 50 ? '- keep going!' : '- you are doing great!') : '- daily cap reached!'}</span><span>${num(d.xp)}/${num(DAILY_CAP.xp)} XP · ${num(d.coins)}/${num(DAILY_CAP.coins)} coins</span></div><div class="bar"><i style="width:${pct}%"></i></div></div>`; };
+const dailyBar = () => { const d = me().daily; const pct = Math.min(100, Math.round((d.xp / DAILY_CAP.xp) * 100)); return `<div class="daily"><div class="row"><span>${ico('streak')} Daily progress ${pct < 100 ? (pct < 50 ? '- keep going!' : '- you are doing well!') : '- daily cap reached!'}</span><span>${num(d.xp)}/${num(DAILY_CAP.xp)} XP</span></div><div class="bar"><i style="width:${pct}%"></i></div></div>`; };
 
 // ---------- navbar + HUD ----------
 const NAV = [['pomodoro', 'P', 'Pomodoro'], ['tasks', 'T', 'Tasks'], ['map', 'M', 'Map'], ['inventory', 'I', 'Inventory'], ['shop', 'Q', 'Shop'], ['settings', 'Esc', 'Settings']] as const;
@@ -75,44 +76,61 @@ function renderHud() {
   const pct = lv.next ? Math.round((lv.into / lv.next) * 100) : 100;
   document.querySelector('#navbar .hud')!.innerHTML = `
     <div class="xp"><span>${ico('xp', 'sm')} Level ${num(lv.level)} · ${lv.next ? `${num(lv.into)}/${num(lv.next)} XP` : 'MAX'}</span><div class="bar"><i style="width:${pct}%"></i></div></div>
-    <span class="pill" title="Coins">${ico('coin')}${num(u.coins)}</span><span class="pill" title="Gems">${ico('gem')}${num(u.gems)}</span><span class="pill" title="Day streak">${ico('streak')}${num(u.streak)}<small>day${u.streak === 1 ? '' : 's'}</small></span>`;
+    <span class="pill" title="Day streak">${ico('streak')}${num(u.streak)}<small>day${u.streak === 1 ? '' : 's'}</small></span>`;
 }
 
-// ---------- tasks (with folders) ----------
-let taskFolder: string | null = null; // null = all
-export function tasksPanel(folder: string | null = taskFolder) {
-  taskFolder = folder;
-  const all = me().tasks;
-  const folders = [...new Set(all.map((t) => t.folder).filter(Boolean))].sort();
-  const tasks = folder === null ? all : all.filter((t) => t.folder === folder);
+// ---------- task calendar ----------
+type TaskView = 'today' | 'week' | 'all';
+let taskFolder: string | null = null;
+let taskView: TaskView = 'today';
+const localDay = (date = new Date()) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+const priorityName = (p: number) => ['Low', 'Normal', 'High'][p - 1] ?? 'Normal';
+
+function folderPopup(onSave: (folder: string) => void) {
+  const p = openPanel(`<h2>📁 New Folder</h2><p class="sub">Give this task group a short name.</p><form id="folder-form" class="form"><label>Folder name</label><input id="folder-name" type="text" maxlength="30" required placeholder="School" autofocus /><div class="form-actions"><button class="btn sage" type="submit">Create folder</button><button class="btn rose" type="button" id="folder-cancel">Cancel</button></div></form>`);
+  name('folder');
+  p.querySelector('#folder-cancel')!.addEventListener('click', () => tasksPanel());
+  p.querySelector<HTMLFormElement>('#folder-form')!.addEventListener('submit', (e) => { e.preventDefault(); const f = p.querySelector<HTMLInputElement>('#folder-name')!.value.trim().slice(0, 30); if (f) onSave(f); });
+  setTimeout(() => p.querySelector<HTMLInputElement>('#folder-name')!.focus(), 0);
+}
+
+export function tasksPanel(folder: string | null = taskFolder, view: TaskView = taskView) {
+  taskFolder = folder; taskView = view;
+  const all = me().tasks.filter((t) => !t.completed_at);
+  const today = localDay();
+  const weekEnd = addDays(today, 6);
+  const folders = [...new Set([...me().folders, ...all.map((t) => t.folder).filter(Boolean)])].sort();
+  const inView = all.filter((t) => view === 'all' || (view === 'today' ? !t.due_date || t.due_date <= today : !!t.due_date && t.due_date >= today && t.due_date <= weekEnd));
+  const tasks = folder === null ? inView : inView.filter((t) => t.folder === folder);
   const row = (t: Task) => {
-    const done = !!t.completed_at, pts = done ? t.xp_awarded : previewReward(t.difficulty, t.est_minutes).xp;
-    return `<div class="task ${done ? 'done' : ''}" data-id="${t.id}">
-      <div class="check" data-act="complete" title="${done ? 'Completed' : 'Mark complete'}">${done ? '✓' : ''}</div>
-      <div><div class="name">${esc(t.name)}</div><div class="desc">${esc(t.description)}${t.folder ? ` <span class="tag">📁 ${esc(t.folder)}</span>` : ''}</div></div>
-      <div class="meta">${stars(t.difficulty)}<span><span class="pts">${ico('xp', 'sm')} +${num(pts)} XP${t.pomodoro && !done ? ' ×2' : ''}</span> 📅 ${dateOf(t.created_at)}</span><span>⏱ ${bucket(t.est_minutes)} (${fmtMin(t.est_minutes)})</span></div>
-      <div class="acts">${done ? '' : '<button class="play" data-act="start" title="Start focus timer">▶</button>'}<select class="mv" title="Move to folder"><option value="">📁 none</option>${folders.map((f) => `<option ${t.folder === f ? 'selected' : ''} value="${esc(f)}">${esc(f)}</option>`).join('')}<option value="__new">+ new folder…</option></select><button class="del" data-act="delete" title="Delete">🗑</button></div></div>`;
+    const pts = previewReward(t.difficulty, t.est_minutes).xp;
+    return `<article class="task priority-${t.priority}" data-id="${t.id}">
+      <div><div class="name">${esc(t.name)}</div><div class="desc">${esc(t.description) || 'No details'}${t.folder ? ` <span class="tag">📁 ${esc(t.folder)}</span>` : ''}</div></div>
+      <div class="meta">${stars(t.difficulty)}<span class="priority">${priorityName(t.priority)} priority</span><span><span class="pts">${ico('xp', 'sm')} +${num(pts)} XP${t.pomodoro ? ' ×2' : ''}</span> 📅 ${t.due_date ? esc(t.due_date) : 'Today'}</span><span>⏱ ${fmtMin(t.est_minutes)}</span></div>
+      <div class="acts"><button class="btn sm complete" data-act="complete">Complete</button><button class="play" data-act="start" title="Start focus timer">▶</button><select class="mv" title="Move to folder"><option value="">No folder</option>${folders.map((f) => `<option ${t.folder === f ? 'selected' : ''} value="${esc(f)}">${esc(f)}</option>`).join('')}<option value="__new">+ New folder</option></select><button class="del" data-act="delete" title="Delete task">🗑</button></div></article>`;
   };
-  const p = openPanel(`<div class="panel-head"><div><h2>📖 My Tasks</h2><p class="sub">Small steps, big progress.</p></div><button class="btn sm" id="new-task">+ New Task</button></div>
-    ${dailyBar()}
-    <div class="tabs folders"><button data-f="" class="${folder === null ? 'on' : ''}">All (${all.length})</button>${folders.map((f) => `<button data-f="${esc(f)}" class="${folder === f ? 'on' : ''}">📁 ${esc(f)} (${all.filter((t) => t.folder === f).length})</button>`).join('')}<button id="add-folder" title="New folder">+ folder</button></div>
-    <div class="task-list">${tasks.length ? tasks.map(row).join('') : '<p class="sub">No tasks here yet. Plant one!</p>'}</div>
-    <p class="sub" style="text-align:center;margin-top:12px">🌱 Progress looks good on you. 🌱</p>`, 'wide');
+  const days = Array.from({ length: 7 }, (_, i) => addDays(today, i));
+  const calendar = view === 'week' ? `<div class="week-grid">${days.map((d, i) => `<button data-day="${d}" class="${d === today ? 'today' : ''}"><b>${['Today', 'Tomorrow'][i] ?? new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })}</b><span>${new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span><i>${all.filter((t) => t.due_date === d).length} task${all.filter((t) => t.due_date === d).length === 1 ? '' : 's'}</i></button>`).join('')}</div>` : '';
+  const p = openPanel(`<div class="panel-head"><div><h2>📖 My Tasks</h2><p class="sub">Plan today and view the next seven days.</p></div><button class="btn sm" id="new-task">+ New Task</button></div>${dailyBar()}
+    <div class="tabs task-views"><button data-v="today" class="${view === 'today' ? 'on' : ''}">To-do Today</button><button data-v="week" class="${view === 'week' ? 'on' : ''}">Week</button><button data-v="all" class="${view === 'all' ? 'on' : ''}">All</button></div>${calendar}
+    <div class="tabs folders"><button data-f="" class="${folder === null ? 'on' : ''}">All folders (${inView.length})</button>${folders.map((f) => `<button data-f="${esc(f)}" class="${folder === f ? 'on' : ''}">📁 ${esc(f)} (${inView.filter((t) => t.folder === f).length})</button>`).join('')}<button id="add-folder">+ New folder</button></div>
+    <div class="task-list">${tasks.length ? tasks.map(row).join('') : '<div class="empty-state"><b>No tasks here.</b><span>Create a task when you are ready.</span></div>'}</div>`, 'wide');
   name('tasks');
   p.querySelector('#new-task')!.addEventListener('click', () => createTaskPanel(folder ?? ''));
-  p.querySelectorAll<HTMLElement>('.folders [data-f]').forEach((b) => b.addEventListener('click', () => tasksPanel(b.dataset.f || null)));
-  p.querySelector('#add-folder')!.addEventListener('click', () => { const f = prompt('Folder name (e.g. School, Gym, Side projects):'); if (f?.trim()) createTaskPanel(f.trim().slice(0, 30)); });
+  p.querySelectorAll<HTMLElement>('[data-v]').forEach((b) => b.addEventListener('click', () => tasksPanel(folder, b.dataset.v as TaskView)));
+  p.querySelectorAll<HTMLElement>('.folders [data-f]').forEach((b) => b.addEventListener('click', () => tasksPanel(b.dataset.f || null, view)));
+  p.querySelectorAll<HTMLElement>('[data-day]').forEach((b) => b.addEventListener('click', () => createTaskPanel(folder ?? '', b.dataset.day)));
+  p.querySelector('#add-folder')!.addEventListener('click', () => folderPopup((f) => createTaskPanel(f)));
   p.querySelectorAll<HTMLSelectElement>('.mv').forEach((s) => s.addEventListener('change', async () => {
     const id = Number(s.closest<HTMLElement>('.task')!.dataset.id);
-    let f = s.value;
-    if (f === '__new') { f = (prompt('Folder name:') || '').trim().slice(0, 30); if (!f) return tasksPanel(); }
-    try { await api.post(`/api/tasks/${id}/folder`, { folder: f }); await refreshMe(); tasksPanel(); } catch (e) { err(e); }
+    if (s.value === '__new') return folderPopup(async (f) => { try { await api.post(`/api/tasks/${id}/folder`, { folder: f }); await refreshMe(); tasksPanel(f, view); } catch (e) { err(e); } });
+    try { await api.post(`/api/tasks/${id}/folder`, { folder: s.value }); await refreshMe(); tasksPanel(folder, view); } catch (e) { err(e); }
   }));
   p.querySelectorAll<HTMLElement>('[data-act]').forEach((b) => b.addEventListener('click', async () => {
     const id = Number(b.closest<HTMLElement>('.task')!.dataset.id), t = all.find((x) => x.id === id)!;
     try {
-      if (b.dataset.act === 'complete' && !t.completed_at) await completeTask(id);
-      else if (b.dataset.act === 'delete') { await api.del(`/api/tasks/${id}`); await refreshMe(); tasksPanel(); }
+      if (b.dataset.act === 'complete') { const yes = await confirmDialog('Complete task', `Did you complete ${t.name}?`, 'Completed!', 'Go back'); if (yes) { await completeTask(id); tasksPanel(folder, view); } else tasksPanel(folder, view); }
+      else if (b.dataset.act === 'delete') { await api.del(`/api/tasks/${id}`); await refreshMe(); tasksPanel(folder, view); }
       else if (b.dataset.act === 'start') { await api.post(`/api/tasks/${id}/start`); await refreshMe(); pomodoroPanel(id); }
     } catch (e) { err(e); }
   }));
@@ -125,15 +143,16 @@ async function completeTask(id: number) {
   if (r.leveledUp) { sfx.levelUp(); setTimeout(() => toast(`🎉 Level ${r.level}! Your garden grew.`, 'reward'), 600); }
   if (panelEl?.dataset.name === 'tasks') tasksPanel();
 }
-export function createTaskPanel(folder = '') {
-  let difficulty = 1, est = 20, mode: '0-30' | '30-60' | '60-180' | '180+' = '0-30';
-  const folders = [...new Set(me().tasks.map((t) => t.folder).filter(Boolean))].sort();
+export function createTaskPanel(folder = '', dueDate = localDay()) {
+  let difficulty = 1, priority = 2, est = 20, mode: '0-30' | '30-60' | '60-180' | '180+' = '0-30';
+  const folders = [...new Set([...me().folders, ...me().tasks.map((t) => t.folder).filter(Boolean)])].sort();
   if (folder && !folders.includes(folder)) folders.push(folder);
   const p = openPanel(`<h2 style="text-align:center">🌱 Create a Task</h2><p class="sub" style="text-align:center">Plant a task today, grow a better tomorrow.</p>
     <form class="form" id="task-form">
       <label>🌱 Task Name</label><input type="text" name="name" maxlength="50" required placeholder="e.g. Finish database homework" /><div class="count"><span id="c1">0</span>/50</div>
       <label>📝 Description</label><textarea name="description" maxlength="200" rows="2" placeholder="Add more details about your task..."></textarea><div class="count"><span id="c2">0</span>/200</div>
       <label>📁 Folder</label><div style="display:flex;gap:8px"><select name="folder" style="flex:1;padding:8px;border:3px solid #d9c8a5;background:#fff9ea"><option value="">none</option>${folders.map((f) => `<option value="${esc(f)}" ${f === folder ? 'selected' : ''}>${esc(f)}</option>`).join('')}</select><input type="text" name="newfolder" maxlength="30" placeholder="or type a new folder" style="flex:1" /></div>
+      <div class="form-split"><label>📅 Due date<input type="date" name="due_date" value="${esc(dueDate)}" /></label><label>🚩 Priority<select name="priority"><option value="1">Low</option><option value="2" selected>Normal</option><option value="3">High</option></select></label></div>
       <label>⛰ Difficulty</label><div class="choice" id="diff">
         <button type="button" data-d="1" class="on">⭐<br/>Easy<small>+10 XP base</small></button><button type="button" data-d="2">⭐⭐<br/>Medium<small>+20 XP base</small></button><button type="button" data-d="3">⭐⭐⭐<br/>Hard<small>+35 XP base</small></button></div>
       <label>⏱ Estimated Time</label><div class="choice" id="time">
@@ -147,6 +166,7 @@ export function createTaskPanel(folder = '') {
   const form = p.querySelector<HTMLFormElement>('#task-form')!;
   const fName = form.elements.namedItem('name') as HTMLInputElement, fDesc = form.elements.namedItem('description') as HTMLTextAreaElement;
   const fFolder = form.elements.namedItem('folder') as HTMLSelectElement, fNew = form.elements.namedItem('newfolder') as HTMLInputElement;
+  const fDue = form.elements.namedItem('due_date') as HTMLInputElement, fPriority = form.elements.namedItem('priority') as HTMLSelectElement;
   const preview = () => { const r = previewReward(difficulty, est); p.querySelector('#preview')!.innerHTML = `You will get ${num(r.xp)} XP + ${num(r.coins)} coins (${fmtMin(est)}) · 2× XP with the focus timer`; };
   const extra = () => {
     const box = p.querySelector('#time-extra')!;
@@ -166,7 +186,8 @@ export function createTaskPanel(folder = '') {
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     try {
-      const t = await api.post<Task>('/api/tasks', { name: fName.value, description: fDesc.value, folder: fNew.value.trim() || fFolder.value, difficulty, est_minutes: est, start });
+      priority = Number(fPriority.value);
+      const t = await api.post<Task>('/api/tasks', { name: fName.value, description: fDesc.value, folder: fNew.value.trim() || fFolder.value, due_date: fDue.value || null, priority, difficulty, est_minutes: est, start });
       await refreshMe(); sfx.plant();
       if (start) pomodoroPanel(t.id); else tasksPanel(t.folder || null);
     } catch (ex) { err(ex); }
@@ -178,6 +199,7 @@ export function createTaskPanel(folder = '') {
 interface Pomo { phase: 'work' | 'break'; rep: number; reps: number; work: number; brk: number; endsAt: number; paused: number | null; taskId: number | null; done: boolean }
 let pomo: Pomo | null = null;
 let pomoTimer: number | undefined;
+export function isPomodoroActive() { return !!pomo && !pomo.done; }
 const mmss = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const remaining = () => (pomo ? (pomo.paused !== null ? pomo.paused : pomo.endsAt - Date.now()) : 0);
 function pomoTick() {
@@ -203,7 +225,7 @@ export function pomodoroPanel(taskId: number | null = null) {
   const p = openPanel(`<div class="pomo">
     <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · 2× XP when completed</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
       <div class="face"><div class="time num" id="pt">${mmss(work * 60_000)}</div></div><div class="phase" id="pp">ready</div>
-      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset">■ Reset</button>${task ? '<button class="btn sage" id="p-done">✓ Done</button>' : ''}</div>
+      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset">■ Reset</button>${task ? '<button class="btn sage" id="p-done" disabled title="Finish the focus session first">Complete task</button>' : ''}</div>
       <div class="dots" id="pd"></div></div>
     <div><h2>Settings</h2>
       <div class="stepper"><span>Work Duration</span><div><button data-k="work" data-d="-5">−</button><b class="num" id="s-work">${work} min</b><button data-k="work" data-d="5">+</button></div></div>
@@ -227,19 +249,26 @@ export function pomodoroPanel(taskId: number | null = null) {
     renderPomo();
   });
   p.querySelector('#p-reset')!.addEventListener('click', () => { pomo = null; clearInterval(pomoTimer); renderPomo(); });
-  p.querySelector('#p-done')?.addEventListener('click', async () => { try { await completeTask(task!.id); if (pomo?.taskId === task!.id) { pomo = null; clearInterval(pomoTimer); } closePanel(); } catch (e) { err(e); } });
+  p.querySelector('#p-done')?.addEventListener('click', async () => {
+    if (!pomo?.done || pomo.taskId !== task!.id) return;
+    const yes = await confirmDialog('Complete task', `Did you complete ${task!.name}?`, 'Completed!', 'Go back');
+    if (!yes) return pomodoroPanel(task!.id);
+    try { await completeTask(task!.id); pomo = null; clearInterval(pomoTimer); closePanel(); } catch (e) { err(e); }
+  });
   renderPomo();
 }
 function renderPomo() {
   const p = panelEl?.dataset.name === 'pomodoro' ? panelEl : null;
   if (p) {
-    const pt = p.querySelector('#pt')!, pp = p.querySelector('#pp')!, btn = p.querySelector('#p-start')!, dots = p.querySelector('#pd')!;
+    const pt = p.querySelector('#pt')!, pp = p.querySelector('#pp')!, btn = p.querySelector<HTMLButtonElement>('#p-start')!, dots = p.querySelector('#pd')!;
     if (pomo) {
       pt.textContent = mmss(remaining());
       pp.textContent = pomo.done ? 'done ✓' : `${pomo.phase === 'work' ? 'work' : 'break'} · session ${pomo.rep} of ${pomo.reps}${pomo.paused !== null ? ' · paused' : ''}`;
       btn.textContent = pomo.done ? '▶ Start again' : pomo.paused !== null ? '▶ Resume' : '⏸ Pause';
       dots.innerHTML = Array.from({ length: pomo.reps * 2 }, (_, i) => { const rep = Math.floor(i / 2) + 1, ph = i % 2 ? 'break' : 'work'; const cur = rep === pomo!.rep && ph === pomo!.phase && !pomo!.done; const done = pomo!.done || rep < pomo!.rep || (rep === pomo!.rep && ph === 'work' && pomo!.phase === 'break'); return `<span class="${cur ? 'on' : done ? 'done' : ''}"><i></i>${ph}</span>`; }).join('');
     } else { pp.textContent = 'ready'; btn.textContent = '▶ Start'; dots.innerHTML = ''; }
+    const doneButton = p.querySelector<HTMLButtonElement>('#p-done');
+    if (doneButton) { const ready = !!pomo?.done && pomo.taskId === Number(doneButton.closest('.panel')?.querySelector('.clock .sub') ? pomo.taskId : -1); doneButton.disabled = !ready; doneButton.title = ready ? 'Complete this task' : 'Finish the focus session first'; }
   }
   renderMini();
 }

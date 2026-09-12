@@ -19,7 +19,7 @@
 		{
 			"binding": "DB",
 			"database_name": "ikigai",
-			"database_id": "6f13ffad-2259-4817-a256-b773c8522bc7",
+			"database_id": "465e79e3-d7db-4d7d-92f6-d0517359f837",
 			"migrations_dir": "migrations"
 		}
 	],
@@ -40,6 +40,8 @@
 		}
 	],
 	"observability": {
-		"enabled": true
+		"enabled": true,
+		"logs": { "enabled": true },
+		"traces": { "enabled": true }
 	}
 }
