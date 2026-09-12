@@ -5,7 +5,7 @@ import fs from 'node:fs';
 
 const OUT = process.argv[2] || 'e2e-out';
 fs.mkdirSync(OUT, { recursive: true });
-const B = 'http://localhost:8787';
+const B = process.env.BASE || 'http://localhost:8787';
 const errors = [];
 const browser = await chromium.launch();
 const shot = (page, name) => page.screenshot({ path: `${OUT}/${name}.png` });
