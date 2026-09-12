@@ -11,7 +11,7 @@ const OBSTACLES: [number, number, number, number][] = [
   [1090, 105, 1275, 361], [1170, 520, 1250, 556], [1010, 600, 1140, 700], [998, 700, 1060, 730], [1190, 660, 1250, 720],
   [206, 546, 411, 720], [411, 576, 504, 720],
 ];
-const CASE_ZONE = { x1: 1000, y1: 330, x2: 1290, y2: 460 };
+const CASE_ZONE = { x1: 940, y1: 300, x2: 1290, y2: 480 };
 
 export class HouseScene extends Phaser.Scene {
   player!: Player;

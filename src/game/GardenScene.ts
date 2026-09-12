@@ -53,7 +53,7 @@ export class GardenScene extends Phaser.Scene {
     // ground
     this.add.tileSprite(0, 0, worldW, worldH, 'tile_grass').setOrigin(0).setDepth(-10);
     const rnd = new Phaser.Math.RandomDataGenerator([String(this.ownerId)]);
-    for (let i = 0; i < (worldW * worldH) / 30000; i++) this.add.image(rnd.between(0, worldW), rnd.between(0, worldH), 'flower').setDepth(-9);
+    for (let i = 0; i < (worldW * worldH) / 45000; i++) this.add.image(rnd.between(0, worldW), rnd.between(0, worldH), 'flower').setDepth(-9);
     const cx = worldW / 2;
     this.add.image(cx, facadeY, 'house_facade').setOrigin(0.5, 0).setDepth(facadeY + facadeH - 40);
     this.doorX = cx; this.doorY = facadeY + facadeH;
@@ -79,7 +79,7 @@ export class GardenScene extends Phaser.Scene {
     decor('bush_round', this.gx - 80, this.gy + gh + 60); decor('bush_round', this.gx + gw + 90, this.gy + 40);
     decor('barrel', cx - 200, facadeY + facadeH + 20, [40, 30]); decor('barrel2', cx + 210, facadeY + facadeH + 10, [40, 30]);
     decor('mailbox', cx + 150, facadeY + facadeH + 60, [24, 24]); decor('bench', this.gx - 130, facadeY + facadeH - 20, [100, 30]);
-    decor('chest', this.gx + gw + 150, facadeY + facadeH + 40, [110, 40]); decor('stone', cx + 260, this.gy + gh + 40);
+    decor('chest', this.gx + gw + 150, facadeY + facadeH + 40, [110, 40]);
     for (let i = 0; i < 4; i++) decor(i % 2 ? 'bush_round' : 'tree_big', rnd.between(60, worldW - 60), worldH - rnd.between(20, 60));
 
     // plots + player
@@ -101,6 +101,7 @@ export class GardenScene extends Phaser.Scene {
 
   onMe() {
     if (this.ownerId !== me().user.id) return;
+    if (gardenTiles(level().level) !== this.n) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; } // levelled up: the fence moves out
     this.view.plots = me().plots; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen;
     this.drawPlots();
   }
@@ -155,8 +156,8 @@ export class GardenScene extends Phaser.Scene {
       join: (p) => this.addPeer(p),
       leave: (id) => { this.peers.get(id)?.destroy(); this.peers.delete(id); },
       move: (m) => { const p = this.peers.get(m.id); if (!p) return; (p as any).target = { x: m.x, y: m.y }; p.setFacing(m.dir as Dir, m.moving); },
-      chat: (id, text) => { const p = id === me().user.id ? this.player : this.peers.get(id); p?.say(text); },
-      typing: (id, on) => { const p = this.peers.get(id); if (!p) return; if (on) p.say('. . .', 0); else p.clearBubble(); },
+      chat: (id, text) => { const p = id === me().user.id ? this.player : this.peers.get(id); if (p) { p.typing = false; p.say(text); } },
+      typing: (id, on) => { const p = this.peers.get(id); if (!p) return; if (on) { p.say('. . .', 0); p.typing = true; } else if (p.typing) { p.typing = false; p.clearBubble(); } },
     });
   }
   private addPeer(p: PeerState) {

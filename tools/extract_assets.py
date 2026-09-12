@@ -91,11 +91,28 @@ gcrop(1230, 660, 1300, 770, 'bench2', 0 or None)
 # fence pieces
 gcrop(200, 500, 560, 545, 'fence_h', 360)
 # tiles
-tg = gcrop(1218, 602, 1266, 650, 'tile_grass', 64)
-# mirror into a 2x2 seamless tile so the tileSprite shows no grid lines
-big = Image.new('RGBA', (128, 128)); big.paste(tg, (0, 0)); big.paste(ImageOps.mirror(tg), (64, 0)); big.paste(ImageOps.flip(tg), (0, 64)); big.paste(ImageOps.flip(ImageOps.mirror(tg)), (64, 64))
-big.save(OUT + 'scenes/tile_grass.png')
-gcrop(1203, 563, 1229, 589, 'flower', 28)   # small flower cluster to scatter on the grass
+# seamless grass: random 4px speckles drawn from the mockup's own grass colours (a raw crop tiles with visible seams)
+tg = g.crop((round(1218 * S), round(602 * S), round(1266 * S), round(650 * S))).convert('RGB')
+cols = sorted(tg.getcolors(tg.width * tg.height), reverse=True)[:6]
+import random; random.seed(7)
+cols = [(n, tuple(min(255, int(c * 1.14)) for c in col)) for n, col in cols]   # mockup grass reads brighter at game scale
+grass = Image.new('RGB', (128, 128), cols[0][1]); px = grass.load()
+weights = [c[0] for c in cols]
+for y in range(0, 128, 4):
+    for x in range(0, 128, 4):
+        col = random.choices([c[1] for c in cols], weights)[0]
+        for dy in range(4):
+            for dx in range(4): px[x + dx, y + dy] = col
+grass.save(OUT + 'scenes/tile_grass.png')
+# tiny procedural daisy to scatter on the grass (a crop from the mockup keyed badly against the generated grass)
+fl = Image.new('RGBA', (14, 14), (0, 0, 0, 0)); fp = fl.load()
+for (x, y) in [(5, 1), (6, 1), (7, 1), (8, 1), (1, 5), (1, 6), (1, 7), (1, 8), (12, 5), (12, 6), (12, 7), (12, 8), (5, 12), (6, 12), (7, 12), (8, 12),
+               (3, 3), (4, 3), (3, 4), (9, 3), (10, 3), (10, 4), (3, 9), (3, 10), (4, 10), (9, 10), (10, 10), (10, 9),
+               (5, 2), (8, 2), (2, 5), (2, 8), (11, 5), (11, 8), (5, 11), (8, 11), (4, 4), (9, 4), (4, 9), (9, 9)]:
+    fp[x, y] = (240, 235, 204, 255)
+for y in range(5, 9):
+    for x in range(5, 9): fp[x, y] = (232, 190, 70, 255)
+fl.save(OUT + 'scenes/flower.png')
 gcrop(680, 585, 720, 625, 'tile_path', 64)
 gcrop(300, 620, 325, 645, 'tile_dirt', 64)
 gcrop(28, 520, 62, 860, 'fence_v', 34)
@@ -117,7 +134,7 @@ print('icons ok')
 
 # ---------- map picture from image5 ----------
 mp = Image.open(D + 'image5.png').convert('RGB')
-mp.crop((round(300 * T), round(195 * T), round(1140 * T), round(725 * T))).resize((1200, 757), Image.LANCZOS).save(OUT + 'ui/map.png', optimize=True)
+mp.crop((round(322 * T), round(262 * T), round(1125 * T), round(718 * T))).resize((1200, 681), Image.LANCZOS).save(OUT + 'ui/map.png', optimize=True)
 
 # ---------- cards from image18 ----------
 cd = Image.open(D + 'image18.png').convert('RGB')   # native 1108px, no scaling
@@ -127,7 +144,7 @@ for i, x1 in enumerate([107, 272, 439, 605]):
 # ---------- landing art from image1 ----------
 ld = Image.open(D + 'image1.png').convert('RGB')
 L = 5760 / 1098
-ld.crop((round(660 * L), round(155 * L), round(1045 * L), round(665 * L))).resize((600, 795), Image.LANCZOS).save(OUT + 'ui/landing_hero.png', optimize=True)
+ld.crop((round(660 * L), round(155 * L), round(1045 * L), round(632 * L))).resize((600, 743), Image.LANCZOS).save(OUT + 'ui/landing_hero.png', optimize=True)
 lm = Image.open(D + 'image1.png').convert('RGBA')
 lm.crop((round(430 * L), round(900 * L), round(1050 * L), round(1225 * L))).resize((900, 472), Image.LANCZOS).save(OUT + 'ui/slot_machine.png', optimize=True)
 # logo text

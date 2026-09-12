@@ -11,6 +11,7 @@ const SPEED = 230;
 export class Player extends Phaser.Physics.Arcade.Sprite {
   dir: Dir = 'down';
   moving = false;
+  typing = false; // remote peer currently shows a "..." bubble
   label: Phaser.GameObjects.Text;
   bubble?: Phaser.GameObjects.Container;
   private bob?: Phaser.Tweens.Tween;

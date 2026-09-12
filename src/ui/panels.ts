@@ -224,13 +224,12 @@ function renderMini() {
 export function mapPanel() {
   const p = openPanel(`<div class="panel-head"><h2>🗺 Map</h2><p class="sub">Click a place to teleport.</p></div>
     <div class="map-img"><img src="/assets/ui/map.png" alt="Map" />
-      <button class="hotspot" style="left:52%;top:31%" data-to="house">🏠 Home<small>Productivity</small></button>
-      <button class="hotspot" style="left:17%;top:63%" data-to="garden">🌱 My Garden</button>
-      <button class="hotspot" style="left:86%;top:63%" data-to="friends">👥 Friends' Gardens</button>
-      <button class="hotspot locked" disabled title="Coming soon">🔒 The Fountain<small>locked</small></button>
+      <button class="hotspot" style="left:50%;top:24%" data-to="house" aria-label="Home"></button>
+      <button class="hotspot" style="left:13.5%;top:54%" data-to="garden" aria-label="My Garden"></button>
+      <button class="hotspot" style="left:89%;top:54%" data-to="friends" aria-label="Friends' Gardens"></button>
+      <div class="hotspot locked" style="left:51.5%;top:70%" title="Coming soon"><span>🔒 locked</span></div>
     </div>`, 'wide');
   name('map');
-  (p.querySelector('.hotspot.locked') as HTMLElement).style.cssText = 'left:52%;top:75%';
   p.querySelectorAll<HTMLElement>('[data-to]').forEach((b) => b.addEventListener('click', () => {
     sfx.click(); closePanel();
     if (b.dataset.to === 'house') goto('House', { spawn: 'center' });
@@ -375,7 +374,7 @@ const fmtMs = (ms: number) => { const mi = Math.ceil(ms / 60000); return mi >= 6
 export function cardCasePanel() {
   const m = me(), slots = caseSlots(level().level), owned = m.cards;
   const p = openPanel(`<h2>🖼 Card Case</h2><p class="sub">${slots} display slots at level ${level().level} (+2 every 5 levels). Pick a card for each slot.</p>
-    <div class="slots">${Array.from({ length: slots }, (_, i) => { const c = owned.find((x) => x.slot === i); return `<div class="slot" style="display:block;padding:6px">${c ? cardHtml(CARDS[c.card_id], false).replace('class="tcard', 'style="width:100%" class="tcard') : '<div style="padding-top:30px">empty</div>'}<select data-slot="${i}" style="width:100%;margin-top:4px"><option value="">— empty —</option>${owned.map((x) => `<option value="${x.card_id}" ${x.slot === i ? 'selected' : ''}>${CARDS[x.card_id].name}</option>`).join('')}</select></div>`; }).join('')}</div>`, 'wide');
+    <div class="slots case">${Array.from({ length: slots }, (_, i) => { const c = owned.find((x) => x.slot === i); return `<div class="slot" style="display:block;padding:6px">${c ? cardHtml(CARDS[c.card_id], false).replace('class="tcard', 'style="width:100%" class="tcard') : '<div style="padding-top:30px">empty</div>'}<select data-slot="${i}" style="width:100%;margin-top:4px"><option value="">— empty —</option>${owned.map((x) => `<option value="${x.card_id}" ${x.slot === i ? 'selected' : ''}>${CARDS[x.card_id].name}</option>`).join('')}</select></div>`; }).join('')}</div>`, 'wide');
   name('case');
   p.querySelectorAll<HTMLSelectElement>('select').forEach((s) => s.addEventListener('change', async () => {
     const slot = Number(s.dataset.slot);
