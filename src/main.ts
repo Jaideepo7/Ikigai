@@ -7,7 +7,7 @@ import { startGame } from './game';
 const app = document.getElementById('app')!;
 
 export function show(html: string) { app.innerHTML = html; app.classList.remove('hidden'); window.scrollTo(0, 0); }
-
+// i love jaideep!
 export const routes = {
   landing: () => show(landing()),
   login: () => show(loginScreen()),
