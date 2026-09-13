@@ -310,7 +310,11 @@ export function importSyllabusPanel(folderHint = '') {
       <label>📁 Class name</label>
       <input type="text" id="syl-class" maxlength="30" required placeholder="e.g. CS 225" value="${esc(folderHint)}" />
       <label>📎 Syllabus PDF</label>
-      <input type="file" id="syl-file" accept="application/pdf,.pdf" required />
+      <div class="file-pick">
+        <input type="file" id="syl-file" class="native-file" accept="application/pdf,.pdf" required />
+        <button type="button" class="btn sm" id="syl-browse">Choose PDF</button>
+        <span class="file-pick-name" id="syl-name">No file chosen</span>
+      </div>
       <p class="sub" id="syl-status"></p>
       <div class="form-actions"><button class="btn sage" type="submit" id="syl-go">Scan syllabus</button><button class="btn rose" type="button" id="syl-cancel">Cancel</button></div>
     </form>
@@ -318,11 +322,19 @@ export function importSyllabusPanel(folderHint = '') {
   name('import-syllabus');
   const status = p.querySelector('#syl-status')!;
   const preview = p.querySelector<HTMLElement>('#syl-preview')!;
+  const fileInput = p.querySelector<HTMLInputElement>('#syl-file')!;
+  const fileName = p.querySelector('#syl-name')!;
+  p.querySelector('#syl-browse')!.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    fileName.textContent = f ? f.name : 'No file chosen';
+    fileName.classList.toggle('on', !!f);
+  });
   p.querySelector('#syl-cancel')!.addEventListener('click', () => tasksPanel(folderHint || null));
   p.querySelector('#syllabus-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
     const className = (p.querySelector('#syl-class') as HTMLInputElement).value.trim().slice(0, 30);
-    const file = (p.querySelector('#syl-file') as HTMLInputElement).files?.[0];
+    const file = fileInput.files?.[0];
     if (!className) return toast('Enter a class name', 'err');
     if (!file) return toast('Choose a PDF', 'err');
     if (file.size > 8_000_000) return toast('PDF must be under 8 MB', 'err');
