@@ -35,6 +35,12 @@
   background: #fff9ea;
   border: 2px solid #c6b088;
 }
+.panel .season-card > .season-art img.season-img,
+.panel .market-season > .season-art img.season-img {
+  width: 38px;
+  height: 38px;
+  image-rendering: pixelated;
+}
 .panel .season-art.summer { background: #faeab0; }
 .panel .season-art.rainy { background: #dce8ef; }
 .panel .season-art.fall { background: #f3d6b8; }
