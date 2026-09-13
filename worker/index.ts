@@ -6,10 +6,11 @@ import {
   SEASON_CHANGE_GEMS, SEASONS, FENCE_COLORS, defaultFences, STARTER_FURNITURE, furnitureById, furnitureFits, shopRotation,
   type Reel, type Season, type FenceColor, type PlacedFurniture,
 } from '../src/shared/rules';
+import { parseSyllabusWithGemini } from './syllabus';
 
 export { GardenRoom } from './garden-room';
 
-export type Env = { DB: D1Database; GARDEN: DurableObjectNamespace; ASSETS: Fetcher };
+export type Env = { DB: D1Database; GARDEN: DurableObjectNamespace; ASSETS: Fetcher; GEMINI_API_KEY?: string };
 interface UserRow {
   id: number; username: string; pass_hash: string; salt: string; friend_code: string; character: number | null;
   coins: number; gems: number; xp: number; streak: number; last_task_day: string | null; last_roll_day: string | null;
@@ -264,6 +265,51 @@ app.post('/api/tasks', async (c) => {
   if (folder) await c.env.DB.prepare('INSERT OR IGNORE INTO task_folders (user_id,name) VALUES (?,?)').bind(u.id, folder).run();
   return c.json(await c.env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(r.meta.last_row_id).first());
 });
+
+/** Read a syllabus (plain text) with Gemini Flash-Lite and return draft tasks for one class folder. */
+app.post('/api/tasks/import-syllabus', async (c) => {
+  const key = c.env.GEMINI_API_KEY;
+  if (!key) return bad('Syllabus import is not configured (missing GEMINI_API_KEY)', 503);
+  const b = await c.req.json().catch(() => ({}));
+  const text = typeof b.text === 'string' ? b.text : '';
+  const className = typeof b.class_name === 'string' ? b.class_name.trim().slice(0, 30) : '';
+  try {
+    const out = await parseSyllabusWithGemini(key, text, className, c.get('today'));
+    return c.json(out);
+  } catch (e) {
+    return bad((e as Error).message || 'Import failed', 400);
+  }
+});
+
+/** Create many tasks at once (used after syllabus preview). Max 40. */
+app.post('/api/tasks/bulk', async (c) => {
+  const u = c.get('user');
+  const b = await c.req.json().catch(() => ({}));
+  const folder = typeof b.folder === 'string' ? b.folder.trim().slice(0, 30) : '';
+  if (!folder) return bad('Class / folder name required');
+  const list = Array.isArray(b.tasks) ? b.tasks.slice(0, 40) : [];
+  if (!list.length) return bad('No tasks to add');
+  const now = Date.now();
+  const created: any[] = [];
+  for (const raw of list) {
+    const name = typeof raw.name === 'string' ? raw.name.trim().slice(0, 50) : '';
+    const description = typeof raw.description === 'string' ? raw.description.trim().slice(0, 200) : '';
+    const dueDate = typeof raw.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(raw.due_date) ? raw.due_date : null;
+    const priority = Number(raw.priority ?? 2);
+    const difficulty = Number(raw.difficulty ?? 2);
+    const est = Number(raw.est_minutes ?? 60);
+    if (!name || ![1, 2, 3].includes(difficulty) || ![1, 2, 3].includes(priority)) continue;
+    if (!Number.isInteger(est) || est < 5 || est > 300) continue;
+    const r = await c.env.DB.prepare('INSERT INTO tasks (user_id,name,description,folder,due_date,priority,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
+      .bind(u.id, name, description, folder, dueDate, priority, difficulty, est, now, null).run();
+    created.push(await c.env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(r.meta.last_row_id).first());
+  }
+  if (!created.length) return bad('No valid tasks to add');
+  await bumpStat(c.env.DB, u.id, 'tasks_created', created.length);
+  await c.env.DB.prepare('INSERT OR IGNORE INTO task_folders (user_id,name) VALUES (?,?)').bind(u.id, folder).run();
+  return c.json({ ok: true, count: created.length, folder, tasks: created });
+});
+
 app.post('/api/tasks/:id/folder', async (c) => {
   const u = c.get('user');
   const folder = String((await c.req.json().catch(() => ({}))).folder ?? '').trim().slice(0, 30);
