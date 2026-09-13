@@ -489,8 +489,19 @@ app.post('/api/shop/season', async (c) => {
   return c.json({ ok: true });
 });
 
-// ---------- furniture in the room ----------
+// ---------- furniture helpers + visiting a friend's room ----------
 const placedRows = (db: D1Database, userId: number) => db.prepare('SELECT id,furniture_id,cx,cy,locked FROM furniture_placed WHERE user_id=?').bind(userId).all<PlacedFurniture>().then((r) => r.results);
+app.get('/api/house/:id', async (c) => {
+  const me = c.get('user'), id = Number(c.req.param('id'));
+  const owner = await c.env.DB.prepare('SELECT * FROM users WHERE id=?').bind(id).first<UserRow>();
+  if (!owner) return bad('No such home', 404);
+  if (id !== me.id && !(await c.env.DB.prepare("SELECT 1 FROM friends WHERE user_id=? AND friend_id=? AND status='accepted'").bind(me.id, id).first())) return bad('Not friends', 403);
+  await ensureInit(c.env.DB, owner);
+  const placed = await placedRows(c.env.DB, id);
+  return c.json({ owner: { id: owner.id, username: owner.username, character: owner.character }, placed });
+});
+
+// ---------- furniture in the room ----------
 app.post('/api/furniture/place', async (c) => {
   const u = c.get('user'), db = c.env.DB;
   const { furniture_id, cx, cy } = await c.req.json().catch(() => ({}));

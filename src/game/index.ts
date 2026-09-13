@@ -42,7 +42,7 @@ class Boot extends Phaser.Scene {
       this.anims.create({ key: `idle_side_${i}`, frames: f(8, 9), frameRate: 2, repeat: -1 });
       this.anims.create({ key: `walk_side_${i}`, frames: f(10, 11), frameRate: 6, repeat: -1 });
     }
-    this.scene.start('House', { spawn: 'center' });
+    this.scene.start('House', { spawn: 'center', ownerId: me().user.id });
   }
 }
 

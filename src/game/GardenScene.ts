@@ -42,6 +42,7 @@ export class GardenScene extends Phaser.Scene {
   private exiting = false;
   private ready = false;
   private doorX = 0; private doorY = 0;
+  private leftHollow: { x0: number; x1: number; y0: number; y1: number } | null = null;
   private chatEl?: HTMLDivElement;
   private shownSeason?: GardenSeason;
   private edit: { tool: EditTool; moving: number | null } | null = null;
@@ -50,8 +51,8 @@ export class GardenScene extends Phaser.Scene {
   private pendingRefresh = false;
   constructor() { super('Garden'); }
 
-  async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
-    this.teardown(); this.ready = false; this.exiting = false; this.edit = null;
+  async create(data: { ownerId: number; spawn?: 'gate' | 'porch' | 'left' }) {
+    this.teardown(); this.ready = false; this.exiting = false; this.edit = null; this.leftHollow = null;
     this.ownerId = data.ownerId;
     const own = this.ownerId === me().user.id;
     this.view = own
@@ -92,9 +93,26 @@ export class GardenScene extends Phaser.Scene {
     house.setDepth(this.doorY - 70);
     this.walls = this.physics.add.staticGroup();
     const hx0 = house.x - house.displayWidth / 2 + 16, hx1 = house.x + house.displayWidth / 2 - 16, hy0 = house.y - house.displayHeight + 120, hy1 = house.y - 26;
-    solidRect(this, this.walls, hx0, hy0, this.doorX - 34 - hx0, hy1 - hy0);
+    // Visiting: leave a hollow on the left wall — arrive from the connecting hallway and step inside their home
+    const hollowW = 40, hollowY0 = hy1 - 70, hollowY1 = hy1 - 12;
+    if (own) {
+      solidRect(this, this.walls, hx0, hy0, this.doorX - 34 - hx0, hy1 - hy0);
+    } else {
+      solidRect(this, this.walls, hx0, hy0, this.doorX - 34 - hx0, hollowY0 - hy0);
+      solidRect(this, this.walls, hx0 + hollowW, hollowY0, Math.max(8, this.doorX - 34 - hx0 - hollowW), hollowY1 - hollowY0);
+      solidRect(this, this.walls, hx0, hollowY1, this.doorX - 34 - hx0, hy1 - hollowY1);
+      // Top roof solid must not cover the hollow opening
+      solidRect(this, this.walls, hx0 + hollowW, hy0, hx1 - hx0 - hollowW, Math.max(8, hollowY0 - hy0));
+      const hall = this.add.graphics().setDepth(house.depth + 1);
+      hall.fillStyle(0x0c0a08).fillRect(hx0 - 8, hollowY0, hollowW + 8, hollowY1 - hollowY0);
+      hall.fillStyle(0x3a2412).fillRect(hx0 - 8, hollowY0, 4, hollowY1 - hollowY0);
+      hall.fillStyle(0x4a3220);
+      for (let i = 0; i < 3; i++) hall.fillRect(hx0 + 4 + i * 8, (hollowY0 + hollowY1) / 2 - 3 + i, 10, 7 - i * 2);
+      this.add.text(hx0 - 10, hollowY0 - 4, 'hall', { fontFamily: 'Pixelify Sans', fontSize: '12px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(1, 1).setDepth(2000);
+      this.leftHollow = { x0: hx0 - 14, x1: hx0 + hollowW + 6, y0: hollowY0, y1: hollowY1 };
+    }
     solidRect(this, this.walls, this.doorX + 34, hy0, hx1 - this.doorX - 34, hy1 - hy0);
-    solidRect(this, this.walls, hx0, hy0, hx1 - hx0, hy1 - 80 - hy0);
+    if (own) solidRect(this, this.walls, hx0, hy0, hx1 - hx0, hy1 - 80 - hy0);
 
     // ---- garden contents ----
     this.plotLayer = this.add.container(0, 0);
@@ -112,8 +130,12 @@ export class GardenScene extends Phaser.Scene {
 
     // ---- player ----
     const gateX = this.ox + (cx + 0.5) * T;
-    const spawn = data.spawn === 'porch' ? [this.doorX, this.doorY + 30] : [gateX, this.oy + (this.gr0 + 2.6) * T];
+    const leftSpawnX = hx0 - 48, leftSpawnY = (hollowY0 + hollowY1) / 2 + 16;
+    const spawn = data.spawn === 'porch' ? [this.doorX, this.doorY + 30]
+      : data.spawn === 'left' ? [leftSpawnX, leftSpawnY]
+      : [gateX, this.oy + (this.gr0 + 2.6) * T];
     this.player = new Player(this, spawn[0], spawn[1], me().user.character ?? 0, me().user.username, true, PLAYER_SCALE);
+    if (data.spawn === 'left') this.player.setFacing('right', false);
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.walls);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
@@ -129,7 +151,7 @@ export class GardenScene extends Phaser.Scene {
     this.connect(own);
     setNavMode('garden');
     if (own) gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
-    setHint(own ? 'E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run · walk up to the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door = go home`);
+    setHint(own ? 'E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run · walk up to the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door or left hall = their home`);
     this.ready = true;
   }
 
@@ -334,7 +356,7 @@ export class GardenScene extends Phaser.Scene {
 
   // ---------- realtime ----------
   private connect(own: boolean) {
-    const goHome = () => { if (!this.exiting) { this.exiting = true; this.scene.start('House', { spawn: 'friends' }); } };
+    const goHome = () => { if (!this.exiting) { this.exiting = true; this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); } };
     this.net = new Net(this.ownerId, {
       roster: (_you, peers) => { waitingOverlay(null); peers.forEach((p) => this.addPeer(p)); },
       join: (p) => { this.addPeer(p); if (own) toast(`${p.name} came to visit`); },
@@ -402,10 +424,20 @@ export class GardenScene extends Phaser.Scene {
       if (tileHere) { const { x, y } = this.tilePx(tileHere[0], tileHere[1]); this.highlight.setPosition(x + T / 2, y + T / 2); }
     }
     if (this.tipEl) this.updateTip(this.input.activePointer);
+    if (document.getElementById('waiting')) return; // still knocking — stay in the garden until accepted / cancelled
+    const own = this.ownerId === me().user.id;
     if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir === 'up') {
       this.exiting = true;
       this.cameras.main.fadeOut(250, 11, 15, 10);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'door' }));
+      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'door', ownerId: this.ownerId }));
+    } else if (!own && this.leftHollow) {
+      const h = this.leftHollow;
+      // Step into the left hallway hollow to enter their home from the side (not back to yours)
+      if (this.player.x > h.x0 && this.player.x < h.x1 && this.player.y > h.y0 && this.player.y < h.y1 + 24) {
+        this.exiting = true;
+        this.cameras.main.fadeOut(250, 11, 15, 10);
+        this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'hallway', ownerId: this.ownerId }));
+      }
     }
   }
 }

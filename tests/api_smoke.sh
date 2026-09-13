@@ -71,6 +71,8 @@ aid=$(req a GET /api/me | J "d['user']['id']")
 req b POST /api/friends/accept "{\"user_id\":$aid}" | J "d['ok']" >/dev/null
 [ "$(req a GET /api/friends | J "d['friends'][0]['status']")" = "accepted" ]
 req a GET /api/garden/$bid | J "'garden of',d['owner']['username'],len(d['plots']),'plots',len(d['fences']),'fences',d['owner']['fence_color']"
+[ "$(req a GET /api/house/$bid | J "d['owner']['id']")" = "$bid" ]
+req a GET /api/house/$bid | J "'home of',d['owner']['username'],len(d['placed']),'furniture'"
 # settings + pomodoro + admin-only + logout
 [ "$(req a POST /api/me/settings '{"frozen":1,"pomo_work":50}' | J "d['pomo_work']")" = "50" ]
 [ "$(req a POST /api/me/admin-level '{"level":50}' | J "d['error']")" = "Admin accounts only" ]
