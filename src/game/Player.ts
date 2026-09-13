@@ -20,13 +20,14 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   bubble?: Phaser.GameObjects.Container;
   private stepTimer = 0;
   private emoteTween?: Phaser.Tweens.Tween;
-  constructor(scene: Phaser.Scene, x: number, y: number, public character: number, name: string, public isLocal: boolean) {
+  constructor(scene: Phaser.Scene, x: number, y: number, public character: number, name: string, public isLocal: boolean, scale = 1) {
     super(scene, x, y, `char_${character}`, 0);
     scene.add.existing(this);
     scene.physics.add.existing(this);
     this.setOrigin(0.5, 1);
+    this.setScale(scale);
     this.body!.setSize(40, 20).setOffset(28, 118);
-    this.label = scene.add.text(x, y - 146, name, { fontFamily: 'Pixelify Sans', fontSize: '16px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 4 }).setOrigin(0.5, 1);
+    this.label = scene.add.text(x, y - FRAME.h * this.scaleY - 6, name, { fontFamily: 'Pixelify Sans', fontSize: '16px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 4 }).setOrigin(0.5, 1);
     this.play(`idle_down_${character}`);
   }
 
@@ -51,8 +52,8 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
   preUpdate(t: number, dt: number) {
     super.preUpdate(t, dt);
     this.setDepth(this.y);
-    this.label.setPosition(this.x, this.y - 146).setDepth(this.y + 1);
-    this.bubble?.setPosition(this.x, this.y - 160).setDepth(this.y + 2);
+    this.label.setPosition(this.x, this.y - FRAME.h * this.scaleY - 6).setDepth(this.y + 1);
+    this.bubble?.setPosition(this.x, this.y - FRAME.h * this.scaleY - 20).setDepth(this.y + 2);
   }
   say(text: string, ms = 5000) {
     this.clearBubble();
@@ -63,7 +64,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     bg.fillStyle(0xf5e9d0, 1).lineStyle(3, 0x745852, 1).fillRoundedRect(-w / 2, -h - 8, w, h, 6).strokeRoundedRect(-w / 2, -h - 8, w, h, 6);
     bg.fillTriangle(-7, -8, 7, -8, 0, 1);
     txt.setY(-14);
-    this.bubble = s.add.container(this.x, this.y - 160, [bg, txt]);
+    this.bubble = s.add.container(this.x, this.y - FRAME.h * this.scaleY - 20, [bg, txt]);
     if (ms > 0) s.time.delayedCall(ms, () => { if (this.bubble?.getAt(1) === txt) this.clearBubble(); });
   }
   clearBubble() { this.bubble?.destroy(); this.bubble = undefined; }

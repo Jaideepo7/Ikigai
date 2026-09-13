@@ -10,6 +10,7 @@ import { T, W, H, TT, layerFrom, solidRect } from './tiles';
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
 const PLANT_H = { flower: 54, tree: 150, twig: 30 };
+const PLAYER_SCALE = 0.45; // Fit characters to the garden fences and small outdoor objects.
 
 /**
  * The garden: an N x N editable grid (N from level) below the house, with a grass margin around it.
@@ -112,7 +113,7 @@ export class GardenScene extends Phaser.Scene {
     // ---- player ----
     const gateX = this.ox + (cx + 0.5) * T;
     const spawn = data.spawn === 'porch' ? [this.doorX, this.doorY + 30] : [gateX, this.oy + (this.gr0 + 2.6) * T];
-    this.player = new Player(this, spawn[0], spawn[1], me().user.character ?? 0, me().user.username, true);
+    this.player = new Player(this, spawn[0], spawn[1], me().user.character ?? 0, me().user.username, true, PLAYER_SCALE);
     this.player.setCollideWorldBounds(true);
     this.physics.add.collider(this.player, this.walls);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
@@ -349,7 +350,7 @@ export class GardenScene extends Phaser.Scene {
   }
   private addPeer(p: PeerState) {
     if (p.id === me().user.id || this.peers.has(p.id)) return;
-    const pl = new Player(this, p.x || this.doorX, p.y || this.oy + (this.gr0 + 2.6) * T, p.character, p.name, false);
+    const pl = new Player(this, p.x || this.doorX, p.y || this.oy + (this.gr0 + 2.6) * T, p.character, p.name, false, PLAYER_SCALE);
     pl.body!.enable = false;
     (pl as any).target = { x: p.x || pl.x, y: p.y || pl.y };
     pl.setFacing(p.dir as Dir, p.moving);
