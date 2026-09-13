@@ -2,7 +2,7 @@
   --nav-height: 84px;
   --sky: #93AEBF; --forest: #103523; --sage: #BCCB9B; --cream: #F0EBCC; --rose: #CD9186; --bark: #745852;
   --navy: #1B417B; --nav: #638BA5; --paper: #F5E9D0; --paper2: #E9D9B8; --ink: #2b2118; --shadow: rgba(0,0,0,.45);
-  --font-pixel: 'Pixelify Sans', 'Courier New', monospace; --font-body: 'Nunito', system-ui, sans-serif;
+  --font-pixel: 'Pixelify Sans', 'Courier New', monospace; --font-body: 'Nunito', system-ui, sans-serif; --font-num: 'VT323', 'Pixelify Sans', monospace;
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; height: 100%; background: var(--sky); color: var(--ink); font-family: var(--font-body); overflow: hidden; }
@@ -90,14 +90,14 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .hud .xp span { display: flex; align-items: center; gap: 4px; }
 .hud .bar { height: 10px; background: #3b5a45; border: 2px solid var(--forest); }
 .hud .bar i { display: block; height: 100%; background: var(--sage); transition: width .4s; }
-.num { font-family: 'VT323', monospace; font-size: 1.25em; line-height: 1; letter-spacing: .5px; }
+.num { font-family: var(--font-num); font-size: 1.25em; line-height: 1; letter-spacing: .5px; font-weight: 400; }
 .ico { width: 26px; height: 26px; image-rendering: pixelated; vertical-align: middle; }
 .ico.sm { width: 18px; height: 18px; } .ico.lg { width: 44px; height: 44px; } .ico.bag { width: 72px; height: 72px; } .ico.dim { opacity: .35; }
 .nav-icons { margin-left: auto; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px; }
 .nav-btn { background: transparent; border: 2px solid transparent; color: var(--cream); display: flex; flex-direction: column; align-items: center; gap: 0; padding: 4px 10px 2px; font-family: var(--font-pixel); font-size: 13px; border-radius: 6px; min-width: 76px; }
 .nav-btn img { width: 34px; height: 34px; }
 .nav-btn span { font-size: 13px; font-weight: 600; }
-.nav-btn kbd { font-family: 'VT323', monospace; font-size: 13px; color: #cfe0ee; background: rgba(0,0,0,.25); padding: 0 6px; border-radius: 3px; }
+.nav-btn kbd { font-family: var(--font-num); font-size: 13px; color: #cfe0ee; background: rgba(0,0,0,.25); padding: 0 6px; border-radius: 3px; }
 .nav-btn:hover, .nav-btn.active { background: rgba(255,255,255,.15); border-color: rgba(240,235,204,.5); }
 
 /* ---------- panels ---------- */
@@ -297,7 +297,7 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .tut h2 { font-size: 36px; margin: 6px 0 10px; }
 .tut p { font-size: 18px; line-height: 1.5; max-width: 520px; margin: 0 auto 16px; }
 #hint { bottom: 12px; font-size: 14px; max-width: 90%; text-align: center; }
-.clock .time { font-family: 'VT323', monospace; font-size: 74px; font-weight: 400; letter-spacing: 2px; }
+.clock .time { font-family: var(--font-num); font-size: 74px; font-weight: 400; letter-spacing: 2px; }
 .stats-grid b.num { font-size: 30px; }
 
 /* ---------- shop and room inventory ---------- */
@@ -359,9 +359,9 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 }
 
 /* ---------- v3: numbers, map, shop, build mode, home ---------- */
-.num, .nav-btn kbd, .clock .time { font-family: 'Times New Roman', Times, serif; }
-.num { font-size: 1.12em; letter-spacing: 0; font-weight: 700; }
-.clock .time { font-size: 70px; font-weight: 700; letter-spacing: 1px; }
+.num, .nav-btn kbd, .clock .time { font-family: var(--font-num); }
+.num { font-size: 1.25em; letter-spacing: .5px; font-weight: 400; }
+.clock .time { font-size: 74px; font-weight: 400; letter-spacing: 2px; }
 .char-grid.five { display: block; padding-bottom: 60px; }
 .char-grid-inner { display: grid; grid-template-columns: repeat(5, 118px); gap: 26px 40px; justify-content: center; }
 .auth-card #admin-level { margin-top: 6px; padding: 10px 14px; border: 2px dashed var(--bark); border-radius: 12px; background: #fff9ea; }
@@ -395,14 +395,14 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .card-offer p { margin: 4px 0 10px; font-size: 14px; color: #6b5a48; }
 .empty-state.small { min-height: 80px; padding: 12px; }
 .spin-box { align-self: start; }
-.machine.v3 { display: block; position: relative; padding: 0; background: transparent; border: 0; box-shadow: none; aspect-ratio: 2238 / 1126; }
+.machine.v3 { display: block; position: relative; padding: 0; background: transparent; border: 0; box-shadow: none; aspect-ratio: 1119 / 563; }
 .machine.v3 .mach { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
-.machine.v3 .reels { position: absolute; left: 22%; top: 30%; width: 61%; height: 33%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 3.4%; margin: 0; }
-.machine.v3 .reel { width: auto; height: auto; background: transparent; border: 0; box-shadow: none; border-radius: 0; font-size: 30px; }
-.machine.v3 .reel .ico.lg { width: 60%; height: auto; }
-.machine.v3 .spin-btn { position: absolute; left: 31%; top: 66%; width: 30%; height: 12%; background: transparent; border: 0; color: #fff9ea; font-family: var(--font-pixel); font-size: 18px; font-weight: 700; text-shadow: 1px 1px 0 #1d3a12; }
+.machine.v3 .reels { position: absolute; left: 24.9%; top: 38.4%; width: 52.5%; height: 23.8%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 13.3%; margin: 0; align-items: center; }
+.machine.v3 .reel { width: auto; height: 100%; background: transparent; border: 0; box-shadow: none; border-radius: 0; font-size: clamp(18px, 5.5vw, 34px); display: grid; place-items: center; line-height: 1; padding: 0; }
+.machine.v3 .reel .ico.lg { width: 58%; height: auto; max-height: 78%; object-fit: contain; display: block; }
+.machine.v3 .spin-btn { position: absolute; left: 30%; top: 74%; width: 35%; height: 20.5%; background: transparent; border: 0; color: #fff9ea; font-family: var(--font-pixel); font-size: clamp(14px, 2.4vw, 20px); font-weight: 700; line-height: 1; padding: 0; display: grid; place-items: center; text-shadow: 1px 1px 0 #1d3a12; }
 .machine.v3 .spin-btn:hover:not(:disabled) { color: #fff; transform: translateY(1px); }
-.machine.v3 .spin-btn:disabled { color: #cdd9b8; font-size: 12px; cursor: not-allowed; }
+.machine.v3 .spin-btn:disabled { color: #cdd9b8; font-size: clamp(9px, 1.5vw, 12px); cursor: not-allowed; }
 .machine.v3 .lever3 { position: absolute; left: 82%; top: 4%; width: 15%; height: 60%; background: transparent; border: 0; cursor: pointer; transition: transform .25s; transform-origin: 50% 90%; }
 .machine.v3 .lever3:hover:not(:disabled) { transform: rotate(6deg); }
 .machine.v3 .lever3.pulled { transform: rotate(38deg); }
