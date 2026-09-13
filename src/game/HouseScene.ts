@@ -11,7 +11,7 @@ import { goto, POMODORO_LOCK_MSG } from './index';
 /**
  * The player's home (or a friend's), drawn on the room template (1536 x 1024). Furniture lives on a 17 x 7 tile grid.
  * Hotspots (press E) attach to placed furniture when it is your own room: bed = sleep, desk = task book, bookcase = card case.
- * Exits: bottom door = that owner's garden; own home has a right-wall hallway to Friends; a friend's home has a left hollow back to yours.
+ * Exits: bottom gateway = that owner's garden; own home has a right-wall gateway to Friends; a friend's home has a left gateway back to yours.
  */
 const ROOM_X0 = 233, ROOM_Y0 = 386, WORLD_W = 1536, WORLD_H = 1024;
 const FLOOR = { x0: 215, y0: 370, x1: 1340, y1: 850 };
@@ -105,36 +105,47 @@ export class HouseScene extends Phaser.Scene {
     else hideHouseHud();
     this.events.once('shutdown', () => { hideHouseHud(); document.getElementById('fmenu')?.remove(); });
     setHint(own
-      ? 'WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · F wave · bottom door = garden · right hallway = friends'
-      : `Visiting ${this.visitName}'s home · bottom door = their garden · left hallway = back to your home`);
+      ? 'WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · F wave · bottom gateway = garden · right gateway = friends'
+      : `Visiting ${this.visitName}'s home · bottom gateway = their garden · left gateway = back to your home`);
     this.ready = true;
   }
 
-  /** Hallway openings: a dark corridor recess instead of a framed door with a knob. */
+  /** Side gateways matching the bottom garden exit: a notch in the room border into a dark opening, with a floor mat and label. */
   private drawHallways(own: boolean) {
     const g = this.add.graphics().setDepth(-15);
-    const draw = (x0: number, outward: 1 | -1, label: string, labelX: number) => {
-      const w = 56, mid = (HALL.y0 + HALL.y1) / 2;
-      // frame
-      g.fillStyle(0x3a2412).fillRect(x0 - (outward < 0 ? w : 0), HALL.y0 - 4, w, HALL.y1 - HALL.y0 + 8);
-      // dark corridor
-      g.fillStyle(0x0c0a08).fillRect(x0 - (outward < 0 ? w - 6 : 6), HALL.y0 + 4, w - 12, HALL.y1 - HALL.y0 - 8);
-      // floor boards fading into the dark
-      g.fillStyle(0x4a3220);
-      for (let i = 0; i < 4; i++) {
-        const t = i / 4, bw = 10 + i * 6, bh = 10 - i;
-        const bx = outward > 0 ? x0 + 8 + i * 10 : x0 - 8 - i * 10 - bw;
-        g.fillRect(bx, mid - bh / 2, bw, bh);
-        g.fillStyle(0x2a1a10).fillRect(bx, mid + bh / 2 - 1, bw, 2);
-        g.fillStyle(0x4a3220);
-        void t;
+    const labelStyle = { fontFamily: 'Pixelify Sans', fontSize: '14px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 } as const;
+    const draw = (side: 'left' | 'right', label: string) => {
+      const gap = HALL.y1 - HALL.y0;
+      const out = 70; // depth of the notch outside the floor, like the garden steps
+      const xEdge = side === 'right' ? FLOOR.x1 : FLOOR.x0;
+      const dir = side === 'right' ? 1 : -1;
+      // dark void beyond the room (same feel as outside the bottom gateway)
+      g.fillStyle(0x0b0f0a);
+      g.fillRect(side === 'right' ? xEdge : xEdge - out, HALL.y0 - 8, out + 8, gap + 16);
+      // wooden outer border notch (matches the light-brown frame around the room)
+      g.fillStyle(0xb39871);
+      g.fillRect(side === 'right' ? xEdge : xEdge - out, HALL.y0 - 10, out, 10);
+      g.fillRect(side === 'right' ? xEdge : xEdge - out, HALL.y1, out, 10);
+      g.fillRect(side === 'right' ? xEdge + out - 10 : xEdge - out, HALL.y0 - 10, 10, gap + 20);
+      // steps / planks leading out through the gateway
+      g.fillStyle(0x8b5a2b);
+      for (let i = 0; i < 3; i++) {
+        const sx = side === 'right' ? xEdge + 4 + i * 18 : xEdge - 22 - i * 18;
+        g.fillRect(sx, HALL.y0 + 8, 16, gap - 16);
+        g.fillStyle(0x6b4423).fillRect(sx, HALL.y1 - 10, 16, 4);
+        g.fillStyle(0x8b5a2b);
       }
-      // side posts
-      g.fillStyle(0x6b4423).fillRect(x0 - (outward < 0 ? 4 : 0), HALL.y0 - 6, 4, HALL.y1 - HALL.y0 + 12);
-      this.add.text(labelX, HALL.y0 - 6, label, { fontFamily: 'Pixelify Sans', fontSize: '14px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 1).setDepth(2000);
+      // small floor mat at the threshold (like the garden doorway mat)
+      g.fillStyle(0x2f5a3a);
+      g.fillRect(side === 'right' ? xEdge - 28 : xEdge + 4, HALL.y0 + gap / 2 - 18, 24, 36);
+      g.fillStyle(0x1e3d28);
+      g.fillRect(side === 'right' ? xEdge - 24 : xEdge + 8, HALL.y0 + gap / 2 - 12, 16, 24);
+      const labelX = side === 'right' ? xEdge + out / 2 : xEdge - out / 2;
+      this.add.text(labelX, HALL.y1 + 14, label, labelStyle).setOrigin(0.5, 0).setDepth(2000);
+      void dir;
     };
-    if (own) draw(FLOOR.x1 - 6, 1, 'friends', FLOOR.x1 + 18);
-    else draw(FLOOR.x0 + 6, -1, 'home', FLOOR.x0 - 18);
+    if (own) draw('right', 'friends');
+    else draw('left', 'home');
   }
 
   onMe() { if (this.ready && this.ownerId === me().user.id) this.drawFurniture(); }

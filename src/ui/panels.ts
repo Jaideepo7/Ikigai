@@ -257,7 +257,7 @@ function pomoTick() {
   if (pomo.phase === 'work') {
     api.post('/api/pomodoro/complete', { task_id: pomo.taskId, minutes: pomo.work }).then(refreshMe).catch(() => {});
     sfx.chime();
-    if (pomo.rep >= pomo.reps) { pomo.done = true; toast(pomo.taskId ? 'Focus session done! Mark the task complete for 2× XP.' : 'All sessions done. Nice work!', 'reward'); }
+    if (pomo.rep >= pomo.reps) { pomo.done = true; toast(pomo.taskId ? 'Focus sessions done! Complete the task from your task list for 2× XP.' : 'All sessions done. Nice work!', 'reward'); }
     else { pomo.phase = 'break'; pomo.endsAt = Date.now() + pomo.brk * 60_000; toast('Break time ☕'); }
   } else { pomo.phase = 'work'; pomo.rep++; pomo.endsAt = Date.now() + pomo.work * 60_000; sfx.chime(); toast(`Session ${pomo.rep} of ${pomo.reps} - focus!`); }
   renderPomo();
@@ -275,9 +275,9 @@ export function pomodoroPanel(taskId: number | null = null) {
   pomoPlan = { work, brk, reps };
   const totalWork = work * reps;
   const p = openPanel(`<div class="pomo">
-    <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · ${num(totalWork)} min work across ${num(reps)} session${reps === 1 ? '' : 's'} · 2× XP when a session finishes before you complete</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
+    <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · ${num(totalWork)} min work across ${num(reps)} session${reps === 1 ? '' : 's'} · finishing a session marks 2× XP when you complete the task later</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
       <div class="face"><div class="time num" id="pt">${mmss(work * 60_000)}</div></div><div class="phase" id="pp">ready</div>
-      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset" type="button">■ Reset</button>${task ? `<button class="btn sage" id="p-done" data-task="${task.id}" type="button">Complete task</button>` : ''}</div>
+      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset" type="button">■ Reset</button></div>
       <div class="dots" id="pd">${dotsHtml(reps)}</div><p class="sub" style="margin-top:10px">🔒 Garden access is disabled during an active focus session.</p></div>
     <div><h2>Settings</h2>
       <div class="stepper"><span>Work Duration</span><div><button data-k="work" data-d="-5">−</button><b class="num" id="s-work">${work} min</b><button data-k="work" data-d="5">+</button></div></div>
@@ -309,11 +309,6 @@ export function pomodoroPanel(taskId: number | null = null) {
     p.querySelector('#pd')!.innerHTML = dotsHtml(vals.reps);
     (p.querySelector('#p-start') as HTMLButtonElement).textContent = '▶ Start';
     renderMini();
-  });
-  p.querySelector('#p-done')?.addEventListener('click', async () => {
-    const yes = await confirmDialog('Complete task', `Did you complete ${task!.name}?`, 'Completed!', 'Go back');
-    if (!yes) return pomodoroPanel(task!.id);
-    try { await completeTask(task!.id); pomo = null; clearInterval(pomoTimer); closePanel(); } catch (e) { err(e); }
   });
   renderPomo();
 }
@@ -650,7 +645,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the hallway on the right to add friends by code. Visit drops you in their home by the left exit; the bottom door leads to their garden, and the left hallway takes you back to yours. Wave and chat with Enter in the garden. They decide whether to let you in.'],
+  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit drops you in their home by the left gateway; the bottom gateway leads to their garden, and the left one takes you back to yours. Wave and chat with Enter in the garden. They decide whether to let you in.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }
