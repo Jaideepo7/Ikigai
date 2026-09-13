@@ -16,7 +16,7 @@ import { goto, POMODORO_LOCK_MSG } from './index';
 const ROOM_X0 = 233, ROOM_Y0 = 386, WORLD_W = 1536, WORLD_H = 1024;
 const FLOOR = { x0: 215, y0: 370, x1: 1340, y1: 850 };
 const DOOR = { x0: 700, x1: 870 };
-const FRIENDS_DOOR = { y0: 560, y1: 690 };
+const HALL = { y0: 560, y1: 690 };
 const FURNITURE_SCALE = 1.5;
 type Spot = 'bed' | 'desk' | 'case';
 type Place = { furniture_id: number; placedId: number | null };
