@@ -5,9 +5,9 @@ import { attachDomain, detachDomain, domainPeer } from './domainNet';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
 import { furnitureMenu, isPanelOpen, isPomodoroActive, plotDialog, setHint, setVisitBadge, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
-import { furnitureById, furnitureArea, gardenFurnitureFits, type PlacedFurniture, gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
+import { furnitureById, furnitureArea, gardenFurnitureFits, type PlacedFurniture, gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile, type HouseView } from '../shared/rules';
 import { T, W, H, TT, SCALE, layerFrom, solidRect } from './tiles';
-import { revealCamera } from './cam';
+import { revealCamera, goScene, ensureCameraClear } from './cam';
 
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
@@ -57,20 +57,21 @@ export class GardenScene extends Phaser.Scene {
   private ghost?: Phaser.GameObjects.Image;
   private placingBusy = false;
   private createGen = 0;
+  private enterLockUntil = 0;
   constructor() { super('Garden'); }
 
-  async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
+  async create(data: { ownerId: number; spawn?: 'gate' | 'porch'; gardenView?: GardenView }) {
     const gen = ++this.createGen;
     this.teardown(); this.ready = false; this.exiting = false; this.edit = null;
     this.ownerId = data.ownerId;
-    // Never fadeIn here — it blacks the camera first, and async create can leave it stuck.
+    this.enterLockUntil = this.time.now + 900;
     revealCamera(this);
     const own = this.ownerId === me().user.id;
     this.view = own
       ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences, furniture: me().placed.filter(p => p.location === 'garden') }
-      : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
+      : (data.gardenView ?? await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; }));
     if (gen !== this.createGen) return;
-    if (!this.view) { detachDomain(this.ownerId); return this.scene.start('House', { spawn: 'center', ownerId: me().user.id }); }
+    if (!this.view) { detachDomain(this.ownerId); return goScene(this, 'House', { spawn: 'center', ownerId: me().user.id }); }
     this.view.plots = this.view.plots.filter((plot) => !plot.plant_id || plantById(plot.plant_id));
 
     // ---- layout ----
@@ -147,10 +148,12 @@ export class GardenScene extends Phaser.Scene {
     else setVisitBadge(`Visiting ${this.view.owner.username}'s garden`);
     if (own) setHint('E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run');
     else setHint(null);
+    this.player.setVelocity(0, 0);
+    this.player.setFacing(this.player.dir, false);
     revealCamera(this);
-    this.time.delayedCall(0, () => revealCamera(this));
-    this.time.delayedCall(350, () => { if (gen === this.createGen) revealCamera(this); });
     this.ready = true;
+    this.net?.resetMoveThrottle();
+    this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'garden');
   }
 
   onMe() {
@@ -479,7 +482,7 @@ export class GardenScene extends Phaser.Scene {
       waitingOverlay(null);
       setVisitBadge(null);
       detachDomain(this.ownerId);
-      this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id });
+      goScene(this, 'House', { spawn: 'hallway', ownerId: me().user.id });
     };
     this.net = attachDomain(this.ownerId, 'garden', {
       roster: (_you, peers) => {
@@ -554,7 +557,9 @@ export class GardenScene extends Phaser.Scene {
 
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting || !this.player.body) return;
-    const [vx, vy, run] = isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
+    ensureCameraClear(this);
+    const locked = this.time.now < this.enterLockUntil;
+    const [vx, vy, run] = locked || isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving, 'garden');
     for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
@@ -573,21 +578,26 @@ export class GardenScene extends Phaser.Scene {
       if (tileHere) { const { x, y } = this.tilePx(tileHere[0], tileHere[1]); this.highlight.setPosition(x + T / 2, y + T / 2); }
     }
     if (this.tipEl) this.updateTip(this.input.activePointer);
-    if (document.getElementById('waiting')) return; // still knocking — stay in the garden until accepted / cancelled
-    if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir.startsWith('up')) {
+    if (document.getElementById('waiting') || locked) return;
+    if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir === 'up') {
       this.exiting = true;
+      this.player.setVelocity(0, 0);
+      this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'garden');
       const ownerId = this.ownerId;
-      const cam = this.cameras.main;
-      let done = false;
-      const go = () => {
-        if (done) return;
-        done = true;
-        cam.off('camerafadeoutcomplete', go);
-        this.scene.start('House', { spawn: 'door', ownerId });
-      };
-      cam.once('camerafadeoutcomplete', go);
-      cam.fadeOut(180, 11, 15, 10);
-      this.time.delayedCall(400, go);
+      void (async () => {
+        let houseView: HouseView | undefined;
+        if (ownerId !== me().user.id) {
+          const view = await api.get<HouseView>(`/api/house/${ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
+          if (!view) {
+            this.exiting = false;
+            this.player.y = this.doorY + 40;
+            this.player.setFacing('down', false);
+            return;
+          }
+          houseView = view;
+        }
+        goScene(this, 'House', { spawn: 'door', ownerId, houseView });
+      })();
     }
   }
 }

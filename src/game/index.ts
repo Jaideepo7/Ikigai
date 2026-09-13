@@ -10,6 +10,7 @@ import { hasDetailedWalk } from '../shared/movement';
 import { connectHub, hubVisit, type KnockEvent } from './hub';
 import { detachDomain, domainOwnerId, domainNet } from './domainNet';
 import { FENCE_COLORS, FURNITURE } from '../shared/rules';
+import { revealCamera } from './cam';
 
 import { W, H } from './tiles';
 export { W, H };
@@ -104,6 +105,17 @@ export async function goto(scene: 'House' | 'Garden', data: Record<string, unkno
   const destOwner = typeof data.ownerId === 'number' ? data.ownerId : me().user.id;
   const cur = domainOwnerId();
   if (cur != null && cur !== destOwner) detachDomain(cur);
+  // Prefetch visit payloads before swapping scenes so the next create never awaits on a blank canvas.
+  if (destOwner !== me().user.id) {
+    try {
+      if (scene === 'Garden' && !data.gardenView) data = { ...data, gardenView: await api.get(`/api/garden/${destOwner}`) };
+      if (scene === 'House' && !data.houseView) data = { ...data, houseView: await api.get(`/api/house/${destOwner}`) };
+    } catch (e) {
+      toast((e as Error).message, 'err');
+      return;
+    }
+  }
+  revealCamera(active);
   active.scene.start(scene, data);
 }
 export function activeScene() { return game?.scene.getScenes(true)[0] as (Phaser.Scene & { startPlacing?: (id: number) => void }) | undefined; }
