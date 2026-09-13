@@ -7,6 +7,7 @@ import { me, level, toast, refreshMe } from '../state';
 import { furnitureMenu, isPanelOpen, isPomodoroActive, plotDialog, setHint, setVisitBadge, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
 import { furnitureById, furnitureArea, gardenFurnitureFits, type PlacedFurniture, gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
 import { T, W, H, TT, SCALE, layerFrom, solidRect } from './tiles';
+import { revealCamera } from './cam';
 
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
@@ -55,19 +56,20 @@ export class GardenScene extends Phaser.Scene {
   private placing: { furniture_id: number; placedId: number | null } | null = null;
   private ghost?: Phaser.GameObjects.Image;
   private placingBusy = false;
+  private createGen = 0;
   constructor() { super('Garden'); }
 
   async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
+    const gen = ++this.createGen;
     this.teardown(); this.ready = false; this.exiting = false; this.edit = null;
     this.ownerId = data.ownerId;
-    // Clear any leftover fade from the previous scene so transitions never stick on a black screen.
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeIn(200, 11, 15, 10);
+    // Never fadeIn here — it blacks the camera first, and async create can leave it stuck.
+    revealCamera(this);
     const own = this.ownerId === me().user.id;
     this.view = own
       ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences, furniture: me().placed.filter(p => p.location === 'garden') }
       : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
+    if (gen !== this.createGen) return;
     if (!this.view) { detachDomain(this.ownerId); return this.scene.start('House', { spawn: 'center', ownerId: me().user.id }); }
     this.view.plots = this.view.plots.filter((plot) => !plot.plant_id || plantById(plot.plant_id));
 
@@ -145,6 +147,9 @@ export class GardenScene extends Phaser.Scene {
     else setVisitBadge(`Visiting ${this.view.owner.username}'s garden`);
     if (own) setHint('E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run');
     else setHint(null);
+    revealCamera(this);
+    this.time.delayedCall(0, () => revealCamera(this));
+    this.time.delayedCall(350, () => { if (gen === this.createGen) revealCamera(this); });
     this.ready = true;
   }
 
@@ -479,6 +484,7 @@ export class GardenScene extends Phaser.Scene {
     this.net = attachDomain(this.ownerId, 'garden', {
       roster: (_you, peers) => {
         waitingOverlay(null);
+        revealCamera(this);
         this.peers.forEach((p) => p.destroy()); this.peers.clear();
         peers.forEach((p) => this.addPeer(p));
         this.net?.resetMoveThrottle();
@@ -573,10 +579,15 @@ export class GardenScene extends Phaser.Scene {
       const ownerId = this.ownerId;
       const cam = this.cameras.main;
       let done = false;
-      const go = () => { if (done) return; done = true; this.scene.start('House', { spawn: 'door', ownerId }); };
+      const go = () => {
+        if (done) return;
+        done = true;
+        cam.off('camerafadeoutcomplete', go);
+        this.scene.start('House', { spawn: 'door', ownerId });
+      };
       cam.once('camerafadeoutcomplete', go);
-      cam.fadeOut(250, 11, 15, 10);
-      this.time.delayedCall(700, go);
+      cam.fadeOut(180, 11, 15, 10);
+      this.time.delayedCall(400, go);
     }
   }
 }

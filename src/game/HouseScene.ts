@@ -9,6 +9,7 @@ import { T, solidRect } from './tiles';
 import { goto, POMODORO_LOCK_MSG } from './index';
 import { Net, type PeerState } from './net';
 import { attachDomain, detachDomain, domainPeer } from './domainNet';
+import { revealCamera } from './cam';
 
 /**
  * The player's home (or a friend's), drawn on the room template (1536 x 1024). Furniture lives on a 17 x 7 tile grid.
@@ -44,22 +45,23 @@ export class HouseScene extends Phaser.Scene {
   private net?: Net;
   private peers = new Map<number, Player>();
   private chatEl?: HTMLDivElement;
+  private createGen = 0;
   constructor() { super('House'); }
 
   async create(data: { spawn?: HouseSpawn; ownerId?: number } = {}) {
+    const gen = ++this.createGen;
     this.teardown();
     this.ready = false; this.exiting = false; this.placing = null; this.editing = false;
     this.furnitureSprites = []; this.furnitureBodies = []; this.spots = []; this.visitPlaced = null; this.visitName = '';
     this.ownerId = data.ownerId ?? me().user.id;
-    // Clear any leftover fade from the previous scene so transitions never stick on a black screen.
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeIn(200, 11, 15, 10);
+    // Never fadeIn here — it blacks the camera first, and async create can leave it stuck.
+    revealCamera(this);
     const own = this.ownerId === me().user.id;
     let ownerName = me().user.username;
 
     if (!own) {
       const view = await api.get<HouseView>(`/api/house/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
+      if (gen !== this.createGen) return;
       if (!view) { detachDomain(this.ownerId); this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); return; }
       this.visitPlaced = view.placed;
       this.visitName = view.owner.username;
@@ -124,6 +126,9 @@ export class HouseScene extends Phaser.Scene {
     this.events.once('shutdown', () => this.teardown());
     if (own) setHint('WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · Enter chat · F wave');
     else setHint(null);
+    revealCamera(this);
+    this.time.delayedCall(0, () => revealCamera(this));
+    this.time.delayedCall(350, () => { if (gen === this.createGen) revealCamera(this); });
     this.ready = true;
   }
 
@@ -140,6 +145,7 @@ export class HouseScene extends Phaser.Scene {
     this.net = attachDomain(this.ownerId, 'house', {
       roster: (_you, peers) => {
         waitingOverlay(null);
+        revealCamera(this);
         this.peers.forEach((p) => p.destroy()); this.peers.clear();
         peers.forEach((p) => this.addPeer(p));
         this.net?.resetMoveThrottle();
@@ -367,13 +373,18 @@ export class HouseScene extends Phaser.Scene {
     }
     this.fadeTo(() => this.scene.start('Garden', data));
   }
-  /** Fade out then run next scene; always recover if the fade callback is missed. */
+  /** Short fade, then next scene. Timeout so a missed fade event never traps the player. */
   private fadeTo(next: () => void) {
     const cam = this.cameras.main;
     let done = false;
-    const go = () => { if (done) return; done = true; next(); };
+    const go = () => {
+      if (done) return;
+      done = true;
+      cam.off('camerafadeoutcomplete', go);
+      next();
+    };
     cam.once('camerafadeoutcomplete', go);
-    cam.fadeOut(250, 11, 15, 10);
-    this.time.delayedCall(700, go);
+    cam.fadeOut(180, 11, 15, 10);
+    this.time.delayedCall(400, go);
   }
 }
