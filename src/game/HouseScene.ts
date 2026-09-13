@@ -3,13 +3,12 @@ import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { me } from '../state';
 import { api } from '../api';
 import { refreshMe, toast } from '../state';
-import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, houseHud, hideHouseHud, furnitureMenu, setNavMode, knockPrompt, waitingOverlay } from '../ui/panels';
+import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, setVisitBadge, houseHud, hideHouseHud, furnitureMenu, setNavMode, waitingOverlay } from '../ui/panels';
 import { ROOM, furnitureById, furnitureFits, type PlacedFurniture, type HouseView } from '../shared/rules';
 import { T, solidRect } from './tiles';
 import { goto, POMODORO_LOCK_MSG } from './index';
 import { Net, type PeerState } from './net';
-import { attachDomain, detachDomain, domainNet, domainPeer } from './domainNet';
-import { sfx } from '../ui/audio';
+import { attachDomain, detachDomain, domainPeer } from './domainNet';
 
 /**
  * The player's home (or a friend's), drawn on the room template (1536 x 1024). Furniture lives on a 17 x 7 tile grid.
@@ -52,13 +51,19 @@ export class HouseScene extends Phaser.Scene {
     this.ready = false; this.exiting = false; this.placing = null; this.editing = false;
     this.furnitureSprites = []; this.furnitureBodies = []; this.spots = []; this.visitPlaced = null; this.visitName = '';
     this.ownerId = data.ownerId ?? me().user.id;
+    // Clear any leftover fade from the previous scene so transitions never stick on a black screen.
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.fadeIn(200, 11, 15, 10);
     const own = this.ownerId === me().user.id;
+    let ownerName = me().user.username;
 
     if (!own) {
       const view = await api.get<HouseView>(`/api/house/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
       if (!view) { detachDomain(this.ownerId); this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); return; }
       this.visitPlaced = view.placed;
       this.visitName = view.owner.username;
+      ownerName = view.owner.username;
     }
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -66,7 +71,9 @@ export class HouseScene extends Phaser.Scene {
     this.add.image(0, 0, 'home_bg').setOrigin(0).setDepth(-20);
 
     this.drawHallways(own);
-    this.add.text((DOOR.x0 + DOOR.x1) / 2, FLOOR.y1 + 60, 'garden', { fontFamily: 'Pixelify Sans', fontSize: '14px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
+    const roomLabel = `${ownerName}'s room`;
+    const roomLabelSize = Math.max(9, Math.min(14, Math.floor(245 / roomLabel.length)));
+    this.add.text((DOOR.x0 + DOOR.x1) / 2, FLOOR.y1 + 60, roomLabel, { fontFamily: 'Pixelify Sans', fontSize: `${roomLabelSize}px`, color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
 
     this.walls = this.physics.add.staticGroup();
     const solid = (x: number, y: number, w: number, h: number) => solidRect(this, this.walls, x, y, w, h);
@@ -112,12 +119,11 @@ export class HouseScene extends Phaser.Scene {
     this.drawFurniture();
     this.connect(own);
     setNavMode('house');
-    if (own) houseHud({ onEdit: () => this.setEditing(!this.editing) });
-    else hideHouseHud();
+    if (own) { houseHud({ onEdit: () => this.setEditing(!this.editing) }); setVisitBadge(null); }
+    else { hideHouseHud(); setVisitBadge(`Visiting ${this.visitName}'s home`); }
     this.events.once('shutdown', () => this.teardown());
-    setHint(own
-      ? 'WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · Enter chat · F wave · bottom gateway = garden · right gateway = friends'
-      : `Visiting ${this.visitName}'s home · Enter chat · F wave · bottom gateway = their garden · left gateway = back to your home`);
+    if (own) setHint('WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · Enter chat · F wave');
+    else setHint(null);
     this.ready = true;
   }
 
@@ -127,11 +133,18 @@ export class HouseScene extends Phaser.Scene {
       if (this.exiting) return;
       this.exiting = true;
       waitingOverlay(null);
+      setVisitBadge(null);
       detachDomain(this.ownerId);
       this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id });
     };
     this.net = attachDomain(this.ownerId, 'house', {
-      roster: (_you, peers) => { waitingOverlay(null); this.peers.forEach((p) => p.destroy()); this.peers.clear(); peers.forEach((p) => this.addPeer(p)); },
+      roster: (_you, peers) => {
+        waitingOverlay(null);
+        this.peers.forEach((p) => p.destroy()); this.peers.clear();
+        peers.forEach((p) => this.addPeer(p));
+        this.net?.resetMoveThrottle();
+        this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'house');
+      },
       join: (p) => { this.addPeer(p); if (own) toast(`${p.name} came to visit`); },
       leave: (id) => { this.peers.get(id)?.destroy(); this.peers.delete(id); },
       move: (m) => {
@@ -148,18 +161,20 @@ export class HouseScene extends Phaser.Scene {
       chat: (id, text) => { const p = id === me().user.id ? this.player : this.peers.get(id); if (p) { p.typing = false; p.say(text); } },
       typing: (id, on) => { const p = this.peers.get(id); if (!p) return; if (on) { p.say('. . .', 0); p.typing = true; } else if (p.typing) { p.typing = false; p.clearBubble(); } },
       emote: (id, kind) => this.peers.get(id)?.emote(kind),
-      knocking: () => { sfx.chime(); waitingOverlay(this.visitName || 'friend', () => goHome()); },
-      knock: (p) => { sfx.chime(); knockPrompt(p.name, p.character, (accept) => domainNet()?.visit(p.id, accept)); },
-      denied: () => { waitingOverlay(null); toast(`${this.visitName || 'They'} are busy right now`, 'err'); goHome(); },
+      knocking: () => { /* waiting overlay already shown on Visit */ },
+      knock: () => { /* doorbell is delivered via the hub */ },
+      denied: () => { waitingOverlay(null); toast(own ? 'Visit cancelled' : `${this.visitName || 'They'} are not home right now`, 'err'); goHome(); },
     });
   }
   private addPeer(p: PeerState) {
     if (p.id === me().user.id || this.peers.has(p.id)) return;
     if (p.area === 'garden') return; // missing area = treat as here until their first move
     const midY = (HALL.y0 + HALL.y1) / 2 + 30;
-    const pl = new Player(this, p.x || (DOOR.x0 + DOOR.x1) / 2, p.y || midY, p.character, p.name, false);
+    const x = (p.x && p.x > 1) ? p.x : (DOOR.x0 + DOOR.x1) / 2;
+    const y = (p.y && p.y > 1) ? p.y : midY;
+    const pl = new Player(this, x, y, p.character, p.name, false);
     pl.body!.enable = false;
-    (pl as any).target = { x: p.x || pl.x, y: p.y || pl.y };
+    (pl as any).target = { x, y };
     pl.setFacing(p.dir as Dir, p.moving);
     this.peers.set(p.id, pl);
   }
@@ -339,8 +354,8 @@ export class HouseScene extends Phaser.Scene {
   }
   private leaveToOwnHome() {
     detachDomain(this.ownerId);
-    this.cameras.main.fadeOut(250, 11, 15, 10);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }));
+    setVisitBadge(null);
+    this.fadeTo(() => this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }));
   }
   private async leaveToGarden() {
     const data = { ownerId: this.ownerId, spawn: 'porch' as const };
@@ -349,7 +364,15 @@ export class HouseScene extends Phaser.Scene {
       if (isPomodoroActive()) { toast(POMODORO_LOCK_MSG, 'err'); stepBack(); return; }
       if (me().user.frozen) { stepBack(); await goto('Garden', data); return; }   // goto() shows the unfreeze dialog
     }
-    this.cameras.main.fadeOut(250, 11, 15, 10);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Garden', data));
+    this.fadeTo(() => this.scene.start('Garden', data));
+  }
+  /** Fade out then run next scene; always recover if the fade callback is missed. */
+  private fadeTo(next: () => void) {
+    const cam = this.cameras.main;
+    let done = false;
+    const go = () => { if (done) return; done = true; next(); };
+    cam.once('camerafadeoutcomplete', go);
+    cam.fadeOut(250, 11, 15, 10);
+    this.time.delayedCall(700, go);
   }
 }

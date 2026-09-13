@@ -81,7 +81,7 @@ await a.waitForFunction(() => document.querySelector('#toasts')?.textContent?.in
 await a.evaluate(() => fetch('/api/friends').then((r) => r.json()).then((d) => fetch('/api/friends/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user_id: d.friends[0].id }) })));
 await b.waitForFunction(() => document.querySelector('#toasts')?.textContent?.includes('accepted your friend request'), null, { timeout: 8000 });
 await b.waitForSelector('[data-visit]', { timeout: 10000 }); await shot(b, '20-friends-online');
-await b.click('[data-visit]'); await b.waitForTimeout(1500); await shot(b, '20b-bob-knocking'); await a.waitForSelector('#knock'); await shot(a, '20c-alice-knock'); await a.click('#k-yes'); await b.waitForTimeout(1500);
+await b.click('[data-visit]'); await b.waitForSelector('#waiting', { timeout: 8000 }); await shot(b, '20b-bob-knocking'); await a.waitForSelector('#knock', { timeout: 10000 }); await shot(a, '20c-alice-knock'); await a.click('#k-yes'); await b.waitForFunction(() => !document.getElementById('waiting'), null, { timeout: 8000 }); await b.waitForTimeout(800);
 // meet in the house (visit lands in the house; alice may still be in the garden)
 await a.evaluate(() => {
   const game = window.__game;

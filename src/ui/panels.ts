@@ -1,6 +1,7 @@
 import { api } from '../api';
 import { me, level, refreshMe, toast, on, store } from '../state';
 import { goto, activeScene } from '../game';
+import { detachDomain } from '../game/domainNet';
 import { sfx, music, setSfx, setVolume, setTrack, TRACKS } from './audio';
 import {
   DAILY_CAP, PLANTS, CARDS, plantById, plantSprite, plantStage, plantReward, growMs, previewReward, plotsUnlocked, STAGES, caseSlots, gardenTiles, MAX_LEVEL,
@@ -127,6 +128,13 @@ export function setHint(text: string | null) {
   let el = document.getElementById('hint');
   if (!text) { el?.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'hint'; overlay().appendChild(el); }
+  if (el.textContent !== text) el.textContent = text;
+}
+/** Compact top-left badge while visiting a friend (home or garden). */
+export function setVisitBadge(text: string | null) {
+  let el = document.getElementById('visit-badge');
+  if (!text) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'visit-badge'; overlay().appendChild(el); }
   if (el.textContent !== text) el.textContent = text;
 }
 /** Modal yes/no. Resolves true on confirm. */
@@ -510,15 +518,19 @@ export async function shopPanel(tab: ShopTab = 'shop') {
 // ---------- settings ----------
 export function settingsPanel() {
   const m = me(), u = m.user, s = m.stats, lv = level().level;
+  const visiting = (() => { const sc = activeScene() as { ownerId?: number } | undefined; return sc?.ownerId != null && sc.ownerId !== u.id; })();
   const tog = (k: string, val: number, label: string, hint = '') => `<div class="setting"><span>${label}${hint ? `<br/><small>${hint}</small>` : ''}</span><div class="toggle ${val ? 'on' : ''}" data-k="${k}"><i></i></div></div>`;
   const stat = (k: string, label: string) => `<div><b class="num">${s[k] ?? 0}</b>${label}</div>`;
+  const freezeHint = visiting
+    ? 'Freeze only works on your own garden. Go home to freeze or unfreeze your farm.'
+    : `Away for a while? Plants will not wither and your streak is safe. Your farm is closed while frozen. ${num(m.freezesLeft)} of ${FREEZES_PER_MONTH} freezes left this month.`;
   const p = openPanel(`<h2>⚙ Settings</h2><p class="sub">${esc(u.username)} · friend code <b>${u.friend_code}</b>${u.is_admin ? ' · admin test account' : ''}</p>
     ${u.is_admin ? `<div class="setting"><span>🧪 Admin level <b class="num" id="lvl-v">${lv}</b><br/><small>0-100. The garden is ${gardenTiles(lv)}×${gardenTiles(lv)} tiles at this level and grows one tile every 5 levels.</small></span><input type="range" id="lvl" min="0" max="${MAX_LEVEL}" value="${lv}" /></div>` : ''}
     ${tog('music', u.music, '🎵 Music')}
     <div class="setting sub-setting"><span>Track</span><div class="choice small" id="tracks">${TRACKS.map((t, i) => `<button data-track="${i}" class="${u.music_track === i ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     <div class="setting sub-setting"><span>Volume <b class="num" id="vol-v">${u.music_volume}</b></span><input type="range" id="vol" min="0" max="100" value="${u.music_volume}" /></div>
     ${tog('sfx', u.sfx, '🔊 Sound effects', 'steps, planting, coins')}
-    <div class="setting"><span>❄ Freeze garden<br/><small>Away for a while? Plants will not wither and your streak is safe. Your farm is closed while frozen. ${num(m.freezesLeft)} of ${FREEZES_PER_MONTH} freezes left this month.</small></span><div class="toggle ${u.frozen ? 'on' : ''}" id="freeze"><i></i></div></div>
+    <div class="setting"><span>❄ Freeze garden<br/><small>${freezeHint}</small></span><div class="toggle ${u.frozen ? 'on' : ''} ${visiting ? 'disabled' : ''}" id="freeze" ${visiting ? 'title="Only your own garden can be frozen"' : ''}><i></i></div></div>
     <div class="setting"><span>🌱 Growth pace<br/><small>How long plants take from seed to fully grown. Patient gardeners earn more when a plant matures.</small></span><div class="choice small" id="growth">${GROWTH_OPTIONS.map((g) => `<button data-g="${g.value}" class="${u.growth === g.value ? 'on' : ''}" title="${g.desc}">${g.label}</button>`).join('')}</div></div>
     <p class="sub" style="padding-left:28px">${GROWTH_OPTIONS.find((g) => g.value === u.growth)?.desc ?? ''}</p>
     <div class="setting"><span>🎓 Tutorial</span><button class="btn sm" id="tut">Replay walkthrough</button></div>
@@ -541,6 +553,7 @@ export function settingsPanel() {
   vol.addEventListener('change', () => save({ music_volume: Number(vol.value) }));
   p.querySelectorAll<HTMLElement>('#growth button').forEach((b) => b.addEventListener('click', async () => { p.querySelectorAll('#growth button').forEach((x) => x.classList.remove('on')); b.classList.add('on'); await save({ growth: Number(b.dataset.g) }); toast(`Growth pace: ${b.textContent}`); settingsPanel(); }));
   p.querySelector('#freeze')!.addEventListener('click', async () => {
+    if (visiting) { toast('You can only freeze your own garden', 'err'); return; }
     const on = !u.frozen;
     if (on && !(await confirmDialog('Freeze your garden?', `Your farm closes until you unfreeze it. Plants will not wither and your streak is safe. This uses 1 of your ${m.freezesLeft} remaining freezes this month.`, 'Freeze', 'Not now'))) return settingsPanel();
     try {
@@ -566,34 +579,60 @@ export async function friendsPanel(silent = false) {
   friendsLast = json;
   const row = (f: FriendRow) => `<div class="friend" data-id="${f.id}"><img src="/assets/chars/portrait_${f.character ?? 0}.png" alt="" /><span class="dot ${f.online ? 'on' : ''}"></span>
     <div class="grow"><b>${esc(f.username)}</b><br/><small>${f.status === 'accepted' ? (f.online ? 'in a garden now' : 'offline') : f.status === 'incoming' ? 'wants to be your friend' : 'request sent'}</small></div>
-    ${f.status === 'accepted' ? `<button class="btn sm sage" data-visit="${f.id}">Visit</button>` : f.status === 'incoming' ? `<button class="btn sm sage" data-accept="${f.id}">Accept</button>` : ''}<button class="btn sm rose" data-remove="${f.id}" title="${f.status === 'incoming' ? 'Decline' : 'Remove'}">✕</button></div>`;
+    ${f.status === 'accepted' ? `<button class="btn sm sage" data-visit="${f.id}" data-name="${esc(f.username)}">Visit</button>` : f.status === 'incoming' ? `<button class="btn sm sage" data-accept="${f.id}">Accept</button>` : ''}<button class="btn sm rose" data-remove="${f.id}" title="${f.status === 'incoming' ? 'Decline' : 'Remove'}">✕</button></div>`;
   const typed = (panelEl?.dataset.name === 'friends' && (panelEl.querySelector('#fcode') as HTMLInputElement | null)?.value) || '';
   const p = openPanel(`<h2>👥 Friends</h2><p class="sub">Share your code so friends can add you. Requests and accepts arrive instantly.</p>
-    <div class="code-box"><span>Your code</span><span class="code">${data.code}</span><input id="fcode" maxlength="6" placeholder="FRIEND CODE" value="${esc(typed)}" /><button class="btn sm" id="fadd">Add</button></div>
+    <div class="code-box"><span>Your code</span><button type="button" class="code" id="copy-fcode" aria-label="Copy friend code ${esc(data.code)}" title="Copy friend code">${esc(data.code)}</button><input id="fcode" maxlength="6" placeholder="FRIEND CODE" value="${esc(typed)}" /><button class="btn sm" id="fadd">Add</button></div>
     ${data.friends.map(row).join('') || '<p class="sub">No friends yet. Send someone your code!</p>'}`);
   name('friends');
   if (!friendsPoll) friendsPoll = window.setInterval(() => friendsPanel(true), 15000);
+  p.querySelector<HTMLButtonElement>('#copy-fcode')!.addEventListener('click', async (e) => {
+    const button = e.currentTarget as HTMLButtonElement, code = data.code;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code);
+      else {
+        const copy = document.createElement('textarea'); copy.value = code; copy.className = 'clipboard-copy'; document.body.appendChild(copy); copy.select();
+        const copied = document.execCommand('copy'); copy.remove();
+        if (!copied) throw new Error('Copy failed');
+      }
+      button.textContent = 'Copied!'; button.classList.add('copied'); sfx.click();
+      setTimeout(() => { if (button.isConnected) { button.textContent = code; button.classList.remove('copied'); } }, 1200);
+    } catch { toast('Could not copy the code.', 'err'); }
+  });
   p.querySelector('#fadd')!.addEventListener('click', async () => { try { await api.post('/api/friends/request', { code: (p.querySelector('#fcode') as HTMLInputElement).value }); toast('Request sent!'); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('[data-accept]').forEach((b) => b.addEventListener('click', async () => { try { await api.post('/api/friends/accept', { user_id: Number(b.dataset.accept) }); sfx.chime(); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
   p.querySelectorAll<HTMLElement>('[data-remove]').forEach((b) => b.addEventListener('click', async () => { try { await api.del(`/api/friends/${b.dataset.remove}`); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
-  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => { closePanel(); goto('House', { ownerId: Number(b.dataset.visit), spawn: 'hallway' }); }));
+  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => {
+    const ownerId = Number(b.dataset.visit);
+    const who = b.dataset.name || 'friend';
+    closePanel();
+    sfx.chime();
+    waitingOverlay(who, () => {
+      waitingOverlay(null);
+      detachDomain(ownerId);
+      goto('House', { spawn: 'hallway', ownerId: me().user.id });
+    });
+    goto('House', { ownerId, spawn: 'hallway' });
+  }));
 }
 /** Owner side: someone is knocking. Non-modal card in the top-right. */
 export function knockPrompt(nameText: string, character: number, answer: (accept: boolean) => void) {
   document.getElementById('knock')?.remove();
   const el = document.createElement('div'); el.id = 'knock';
-  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is at your door.<br/><small>Let them into your home?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
+  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is ringing your doorbell.<br/><small>Let them into your home?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
   overlay().appendChild(el); sfx.chime();
-  el.querySelector('#k-yes')!.addEventListener('click', () => { answer(true); el.remove(); });
-  el.querySelector('#k-no')!.addEventListener('click', () => { answer(false); el.remove(); });
-  setTimeout(() => { if (el.isConnected) { answer(false); el.remove(); } }, 45_000);
+  let done = false;
+  const finish = (v: boolean) => { if (done) return; done = true; el.remove(); answer(v); };
+  el.querySelector('#k-yes')!.addEventListener('click', () => finish(true));
+  el.querySelector('#k-no')!.addEventListener('click', () => finish(false));
+  setTimeout(() => { if (el.isConnected) finish(false); }, 45_000);
 }
 /** Visitor side: waiting for the owner. Pass null to hide. */
 export function waitingOverlay(owner: string | null, cancel?: () => void) {
   document.getElementById('waiting')?.remove();
   if (!owner) return;
   const el = document.createElement('div'); el.id = 'waiting';
-  el.innerHTML = `<div class="panel" style="width:420px;text-align:center"><h2>🚪 Knocking...</h2><p class="sub">Waiting for <b>${esc(owner)}</b> to let you in.</p><div class="dots-anim"><i></i><i></i><i></i></div><button class="btn rose sm" id="w-cancel">Go back home</button></div>`;
+  el.innerHTML = `<div class="panel" style="width:420px;text-align:center"><h2>🔔 Ringing doorbell...</h2><p class="sub">Waiting for <b>${esc(owner)}</b> to let you in.</p><div class="dots-anim"><i></i><i></i><i></i></div><button class="btn rose sm" id="w-cancel">Go back home</button></div>`;
   overlay().appendChild(el);
   el.querySelector('#w-cancel')!.addEventListener('click', () => { el.remove(); cancel?.(); });
 }
@@ -711,7 +750,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit knocks at their door — they let you into their home. Once inside you can walk between their house and garden freely, see each other in real time, and the left gateway takes you back to yours. Wave and chat with Enter.'],
+  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit rings their doorbell — wait for them to let you into their home. Once inside you can see each other, walk to their garden freely, and the left gateway takes you back to yours.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }
