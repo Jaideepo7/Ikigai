@@ -113,10 +113,6 @@ icon('xp', [
     '.......yy.......', '......yyyy......', '......yyyy......', '.....yyyyyy.....', 'yyyyyyyyyyyyyyyy', '.yyyyyyyyyyyyyy.', '..yyyyyyyyyyyy..',
     '...yyyyyyyyyy...', '...yyyyyyyyyy...', '..yyyyyyyyyyyy..', '..yyyyy..yyyyy..', '.yyyy......yyyy.', 'yyy..........yyy', '................',
     '................', '................'], {'y': (240, 196, 60, 255)})
-icon('seedbag', [
-    '......bbbb......', '.....bccccb.....', '.....bccccb.....', '....bbbbbbbb....', '...bwwwwwwwwb...', '..bwwwwwwwwwwb..', '..bwwggggggwwb..', '..bwwgGGGGgwwb..',
-    '..bwwgGGGGgwwb..', '..bwwggggggwwb..', '..bwwwwwwwwwwb..', '..bwwwwwwwwwwb..', '..bwwwwwwwwwwb..', '...bbbbbbbbbb...', '................', '................'],
-    {'b': (116, 88, 82, 255), 'c': (205, 145, 134, 255), 'w': (240, 235, 204, 255), 'g': (60, 130, 60, 255), 'G': (140, 200, 90, 255)})
 icon('lock', [
     '................', '.....bbbbbb.....', '....bb....bb....', '....b......b....', '....b......b....', '..dddddddddddd..', '..dddddddddddd..', '..ddddd..ddddd..',
     '..ddddd..ddddd..', '..dddddddddddd..', '..dddddddddddd..', '..dddddddddddd..', '...dddddddddd...', '................', '................', '................'],
