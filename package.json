@@ -26,6 +26,7 @@
   "type": "module",
   "dependencies": {
     "hono": "^4.13.7",
+    "pdfjs-dist": "^4.10.38",
     "phaser": "^3.90.0"
   },
   "devDependencies": {
