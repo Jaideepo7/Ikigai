@@ -292,15 +292,42 @@ export function createTaskPanel(folder = '', dueDate = localDay()) {
   fName.addEventListener('input', () => (p.querySelector('#c1')!.textContent = String(fName.value.length)));
   fDesc.addEventListener('input', () => (p.querySelector('#c2')!.textContent = String(fDesc.value.length)));
   let start = false;
+  let busy = false;
   form.querySelectorAll<HTMLButtonElement>('[data-start]').forEach((b) => b.addEventListener('click', () => (start = b.dataset.start === '1')));
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
+    if (busy) return;
+    const name = fName.value.trim();
+    if (!name) { toast('Task needs a name', 'err'); return; }
+    busy = true;
+    form.querySelectorAll('button').forEach((b) => { (b as HTMLButtonElement).disabled = true; });
     try {
       priority = Number(fPriority.value);
-      const t = await api.post<Task>('/api/tasks', { name: fName.value, description: fDesc.value, folder: fNew.value.trim() || fFolder.value, due_date: fDue.value || null, priority, difficulty, est_minutes: est, start });
-      await refreshMe(); sfx.plant();
-      if (start) pomodoroPanel(t.id); else tasksPanel(t.folder || null);
-    } catch (ex) { err(ex); }
+      const t = await api.post<Task>('/api/tasks', {
+        name,
+        description: fDesc.value.trim(),
+        folder: fNew.value.trim() || fFolder.value,
+        due_date: fDue.value || null,
+        priority,
+        difficulty,
+        est_minutes: est,
+        start,
+      });
+      if (!t?.id) throw new Error('Task was not created');
+      await refreshMe();
+      // Read-after-write: if /api/me is briefly stale, keep the created row in the store.
+      if (!me().tasks.some((x) => x.id === t.id)) {
+        store.me = { ...me(), tasks: [t, ...me().tasks] };
+      }
+      sfx.plant();
+      const due = t.due_date, today = localDay();
+      const view: TaskView = !due || due <= today ? 'today' : due <= addDays(today, 6) ? 'week' : 'all';
+      if (start) pomodoroPanel(t.id); else tasksPanel(t.folder || null, view);
+    } catch (ex) {
+      err(ex);
+      busy = false;
+      form.querySelectorAll('button').forEach((b) => { (b as HTMLButtonElement).disabled = false; });
+    }
   });
   preview();
 }

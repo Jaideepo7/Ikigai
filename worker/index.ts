@@ -253,17 +253,21 @@ app.post('/api/tasks', async (c) => {
   const folder = typeof b.folder === 'string' ? b.folder.trim().slice(0, 30) : '';
   const dueDate = typeof b.due_date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(b.due_date) ? b.due_date : null;
   const priority = Number(b.priority ?? 2);
-  const difficulty = Number(b.difficulty), est = Number(b.est_minutes);
+  const difficulty = Number(b.difficulty);
+  const est = Math.round(Number(b.est_minutes));
   if (!name) return bad('Task needs a name');
   if (![1, 2, 3].includes(difficulty)) return bad('Difficulty must be 1-3');
   if (![1, 2, 3].includes(priority)) return bad('Priority must be 1-3');
-  if (!Number.isInteger(est) || est < 5 || est > 300) return bad('Estimate must be 5-300 minutes');
+  if (!Number.isFinite(est) || est < 5 || est > 300) return bad('Estimate must be 5-300 minutes');
   const now = Date.now();
-  const r = await c.env.DB.prepare('INSERT INTO tasks (user_id,name,description,folder,due_date,priority,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-    .bind(u.id, name, description, folder, dueDate, priority, difficulty, est, now, b.start ? now : null).run();
+  // RETURNING is reliable; meta.last_row_id has been flaky on D1 and can return the wrong/empty row.
+  const row = await c.env.DB.prepare(
+    'INSERT INTO tasks (user_id,name,description,folder,due_date,priority,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING *',
+  ).bind(u.id, name, description, folder, dueDate, priority, difficulty, est, now, b.start ? now : null).first();
+  if (!row) return bad('Could not create task', 500);
   await bumpStat(c.env.DB, u.id, 'tasks_created');
   if (folder) await c.env.DB.prepare('INSERT OR IGNORE INTO task_folders (user_id,name) VALUES (?,?)').bind(u.id, folder).run();
-  return c.json(await c.env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(r.meta.last_row_id).first());
+  return c.json(row);
 });
 
 /** Read a syllabus (plain text) with Gemini Flash-Lite and return draft tasks for one class folder. */
@@ -300,9 +304,10 @@ app.post('/api/tasks/bulk', async (c) => {
     const est = Number(raw.est_minutes ?? 60);
     if (!name || ![1, 2, 3].includes(difficulty) || ![1, 2, 3].includes(priority)) continue;
     if (!Number.isInteger(est) || est < 5 || est > 300) continue;
-    const r = await c.env.DB.prepare('INSERT INTO tasks (user_id,name,description,folder,due_date,priority,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?,?,?,?)')
-      .bind(u.id, name, description, folder, dueDate, priority, difficulty, est, now, null).run();
-    created.push(await c.env.DB.prepare('SELECT * FROM tasks WHERE id=?').bind(r.meta.last_row_id).first());
+    const r = await c.env.DB.prepare(
+      'INSERT INTO tasks (user_id,name,description,folder,due_date,priority,difficulty,est_minutes,created_at,started_at) VALUES (?,?,?,?,?,?,?,?,?,?) RETURNING *',
+    ).bind(u.id, name, description, folder, dueDate, priority, difficulty, est, now, null).first();
+    if (r) created.push(r);
   }
   if (!created.length) return bad('No valid tasks to add');
   await bumpStat(c.env.DB, u.id, 'tasks_created', created.length);
