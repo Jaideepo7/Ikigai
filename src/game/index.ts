@@ -7,6 +7,7 @@ import { music, setSfx, unlock, setVolume, setTrack } from '../ui/audio';
 import { api } from '../api';
 import { FRAME, CHARACTERS } from './Player';
 import { connectHub } from './hub';
+import { detachDomain, domainOwnerId } from './domainNet';
 import { FENCE_COLORS, FURNITURE } from '../shared/rules';
 
 import { W, H } from './tiles';
@@ -91,6 +92,9 @@ export async function goto(scene: 'House' | 'Garden', data: Record<string, unkno
     if (!ok) return;
     try { await api.post('/api/me/freeze', { on: false }); await refreshMe(); toast('Garden unfrozen'); } catch (e) { toast((e as Error).message, 'err'); return; }
   }
+  const destOwner = typeof data.ownerId === 'number' ? data.ownerId : me().user.id;
+  const cur = domainOwnerId();
+  if (cur != null && cur !== destOwner) detachDomain(cur);
   active.scene.start(scene, data);
 }
 export function activeScene() { return game?.scene.getScenes(true)[0] as (Phaser.Scene & { startPlacing?: (id: number) => void }) | undefined; }

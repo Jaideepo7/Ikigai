@@ -82,6 +82,13 @@ await a.evaluate(() => fetch('/api/friends').then((r) => r.json()).then((d) => f
 await b.waitForFunction(() => document.querySelector('#toasts')?.textContent?.includes('accepted your friend request'), null, { timeout: 8000 });
 await b.waitForSelector('[data-visit]', { timeout: 10000 }); await shot(b, '20-friends-online');
 await b.click('[data-visit]'); await b.waitForTimeout(1500); await shot(b, '20b-bob-knocking'); await a.waitForSelector('#knock'); await shot(a, '20c-alice-knock'); await a.click('#k-yes'); await b.waitForTimeout(1500);
+// meet in the house (visit lands in the house; alice may still be in the garden)
+await a.evaluate(() => {
+  const game = window.__game;
+  const sc = game.scene.getScenes(true)[0];
+  sc.scene.start('House', { spawn: 'door', ownerId: sc.ownerId });
+});
+await a.waitForTimeout(1200);
 await hold(b, 'ArrowDown', 600);
 await b.keyboard.press('Enter'); await b.waitForSelector('#chat input'); await b.type('#chat input', 'hello from bob!'); await b.waitForTimeout(400);
 await shot(a, '21-alice-sees-typing');

@@ -515,7 +515,7 @@ export async function friendsPanel(silent = false) {
 export function knockPrompt(nameText: string, character: number, answer: (accept: boolean) => void) {
   document.getElementById('knock')?.remove();
   const el = document.createElement('div'); el.id = 'knock';
-  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is at your gate.<br/><small>Let them into your garden?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
+  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is at your door.<br/><small>Let them into your home?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
   overlay().appendChild(el); sfx.chime();
   el.querySelector('#k-yes')!.addEventListener('click', () => { answer(true); el.remove(); });
   el.querySelector('#k-no')!.addEventListener('click', () => { answer(false); el.remove(); });
@@ -644,7 +644,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit drops you in their home by the left gateway; the bottom gateway leads to their garden, and the left one takes you back to yours. Wave and chat with Enter in the garden. They decide whether to let you in.'],
+  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit knocks at their door — they let you into their home. Once inside you can walk between their house and garden freely, see each other in real time, and the left gateway takes you back to yours. Wave and chat with Enter.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }

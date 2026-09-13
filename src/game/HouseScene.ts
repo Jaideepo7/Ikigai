@@ -1,17 +1,21 @@
 import Phaser from 'phaser';
-import { Player, makeKeys, readInput, typingInDom } from './Player';
+import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { me } from '../state';
 import { api } from '../api';
 import { refreshMe, toast } from '../state';
-import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, houseHud, hideHouseHud, furnitureMenu, setNavMode } from '../ui/panels';
+import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, houseHud, hideHouseHud, furnitureMenu, setNavMode, knockPrompt, waitingOverlay } from '../ui/panels';
 import { ROOM, furnitureById, furnitureFits, type PlacedFurniture, type HouseView } from '../shared/rules';
 import { T, solidRect } from './tiles';
 import { goto, POMODORO_LOCK_MSG } from './index';
+import { Net, type PeerState } from './net';
+import { attachDomain, detachDomain, domainNet, domainPeer } from './domainNet';
+import { sfx } from '../ui/audio';
 
 /**
  * The player's home (or a friend's), drawn on the room template (1536 x 1024). Furniture lives on a 17 x 7 tile grid.
  * Hotspots (press E) attach to placed furniture when it is your own room: bed = sleep, desk = task book, bookcase = card case.
  * Exits: bottom gateway = that owner's garden; own home has a right-wall gateway to Friends; a friend's home has a left gateway back to yours.
+ * Realtime peers share the domain socket with the garden (knock once, then free house ↔ garden).
  */
 const ROOM_X0 = 233, ROOM_Y0 = 386, WORLD_W = 1536, WORLD_H = 1024;
 const FLOOR = { x0: 215, y0: 370, x1: 1340, y1: 850 };
@@ -38,9 +42,13 @@ export class HouseScene extends Phaser.Scene {
   private ready = false;
   private visitPlaced: PlacedFurniture[] | null = null;
   private visitName = '';
+  private net?: Net;
+  private peers = new Map<number, Player>();
+  private chatEl?: HTMLDivElement;
   constructor() { super('House'); }
 
   async create(data: { spawn?: HouseSpawn; ownerId?: number } = {}) {
+    this.teardown();
     this.ready = false; this.exiting = false; this.placing = null; this.editing = false;
     this.furnitureSprites = []; this.furnitureBodies = []; this.spots = []; this.visitPlaced = null; this.visitName = '';
     this.ownerId = data.ownerId ?? me().user.id;
@@ -48,7 +56,7 @@ export class HouseScene extends Phaser.Scene {
 
     if (!own) {
       const view = await api.get<HouseView>(`/api/house/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
-      if (!view) { this.scene.start('House', { spawn: 'hallway' }); return; }
+      if (!view) { detachDomain(this.ownerId); this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); return; }
       this.visitPlaced = view.placed;
       this.visitName = view.owner.username;
     }
@@ -94,20 +102,90 @@ export class HouseScene extends Phaser.Scene {
     this.physics.add.collider(this.player, this.walls);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.keys = makeKeys(this);
+    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !typingInDom() && !this.chatEl) fn(); };
     this.input.keyboard!.on('keydown-E', () => { if (own && !isPanelOpen() && !typingInDom() && !this.placing) this.interact(); });
-    this.input.keyboard!.on('keydown-F', () => { if (!isPanelOpen() && !typingInDom()) this.player.emote('wave'); });
+    this.input.keyboard!.on('keydown-F', guarded(() => { this.player.emote('wave'); this.net?.emote('wave'); }));
+    this.input.keyboard!.on('keydown-ENTER', guarded(() => this.openChat()));
     this.input.keyboard!.on('keydown-ESC', () => { if (this.placing && !isPanelOpen()) this.stopPlacing(); else if (this.editing && !isPanelOpen()) this.setEditing(false); });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.moveGhost(p));
     this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { if (this.placing && !isPanelOpen()) this.placeAt(p); });
     this.drawFurniture();
+    this.connect(own);
     setNavMode('house');
     if (own) houseHud({ onEdit: () => this.setEditing(!this.editing) });
     else hideHouseHud();
-    this.events.once('shutdown', () => { hideHouseHud(); document.getElementById('fmenu')?.remove(); });
+    this.events.once('shutdown', () => this.teardown());
     setHint(own
-      ? 'WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · F wave · bottom gateway = garden · right gateway = friends'
-      : `Visiting ${this.visitName}'s home · bottom gateway = their garden · left gateway = back to your home`);
+      ? 'WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · Enter chat · F wave · bottom gateway = garden · right gateway = friends'
+      : `Visiting ${this.visitName}'s home · Enter chat · F wave · bottom gateway = their garden · left gateway = back to your home`);
     this.ready = true;
+  }
+
+  // ---------- realtime (shared with garden for this owner) ----------
+  private connect(own: boolean) {
+    const goHome = () => {
+      if (this.exiting) return;
+      this.exiting = true;
+      waitingOverlay(null);
+      detachDomain(this.ownerId);
+      this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id });
+    };
+    this.net = attachDomain(this.ownerId, 'house', {
+      roster: (_you, peers) => { waitingOverlay(null); this.peers.forEach((p) => p.destroy()); this.peers.clear(); peers.forEach((p) => this.addPeer(p)); },
+      join: (p) => { this.addPeer(p); if (own) toast(`${p.name} came to visit`); },
+      leave: (id) => { this.peers.get(id)?.destroy(); this.peers.delete(id); },
+      move: (m) => {
+        if (m.area === 'garden') { this.peers.get(m.id)?.destroy(); this.peers.delete(m.id); return; }
+        let p = this.peers.get(m.id);
+        if (!p) {
+          const known = domainPeer(m.id);
+          this.addPeer({ id: m.id, name: known?.name ?? 'friend', character: known?.character ?? 0, x: m.x, y: m.y, dir: m.dir, moving: m.moving, area: 'house' });
+          p = this.peers.get(m.id);
+        }
+        if (!p) return;
+        (p as any).target = { x: m.x, y: m.y }; p.setFacing(m.dir as Dir, m.moving);
+      },
+      chat: (id, text) => { const p = id === me().user.id ? this.player : this.peers.get(id); if (p) { p.typing = false; p.say(text); } },
+      typing: (id, on) => { const p = this.peers.get(id); if (!p) return; if (on) { p.say('. . .', 0); p.typing = true; } else if (p.typing) { p.typing = false; p.clearBubble(); } },
+      emote: (id, kind) => this.peers.get(id)?.emote(kind),
+      knocking: () => { sfx.chime(); waitingOverlay(this.visitName || 'friend', () => goHome()); },
+      knock: (p) => { sfx.chime(); knockPrompt(p.name, p.character, (accept) => domainNet()?.visit(p.id, accept)); },
+      denied: () => { waitingOverlay(null); toast(`${this.visitName || 'They'} are busy right now`, 'err'); goHome(); },
+    });
+  }
+  private addPeer(p: PeerState) {
+    if (p.id === me().user.id || this.peers.has(p.id)) return;
+    if (p.area === 'garden') return; // missing area = treat as here until their first move
+    const midY = (HALL.y0 + HALL.y1) / 2 + 30;
+    const pl = new Player(this, p.x || (DOOR.x0 + DOOR.x1) / 2, p.y || midY, p.character, p.name, false);
+    pl.body!.enable = false;
+    (pl as any).target = { x: p.x || pl.x, y: p.y || pl.y };
+    pl.setFacing(p.dir as Dir, p.moving);
+    this.peers.set(p.id, pl);
+  }
+  private openChat() {
+    if (this.chatEl) return;
+    const el = document.createElement('div'); el.id = 'chat';
+    const input = document.createElement('input'); input.maxLength = 140; input.placeholder = 'Say something... (Enter to send, Esc to cancel)';
+    el.appendChild(input); document.getElementById('overlay')!.appendChild(el);
+    this.chatEl = el;
+    let typing = false, sent = false;
+    input.addEventListener('input', () => { const on = input.value.length > 0; if (on !== typing) { typing = on; this.net?.typing(on); } });
+    const close = () => { if (this.chatEl !== el) return; if (typing && !sent) this.net?.typing(false); el.remove(); this.chatEl = undefined; };
+    input.addEventListener('keydown', (e) => {
+      e.stopPropagation();
+      if (e.key === 'Escape') close();
+      if (e.key === 'Enter') { const text = input.value.trim(); if (text) { sent = true; this.net?.chat(text); this.player.say(text); } close(); }
+    });
+    input.addEventListener('blur', () => setTimeout(close, 100));
+    setTimeout(() => input.focus(), 0);
+  }
+  private teardown() {
+    // Keep the domain socket open when switching to this owner's garden
+    this.peers.forEach((p) => p.destroy()); this.peers.clear();
+    this.chatEl?.remove(); this.chatEl = undefined;
+    hideHouseHud(); document.getElementById('fmenu')?.remove();
+    this.net = undefined;
   }
 
   /** Side gateways matching the bottom garden exit: a notch in the room border into a dark opening, with a floor mat and label. */
@@ -238,7 +316,8 @@ export class HouseScene extends Phaser.Scene {
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting) return;
     const own = this.ownerId === me().user.id;
-    const [vx, vy, run] = isPanelOpen() || typingInDom() ? [0, 0, false] : readInput(this.keys);
+    const waiting = !!document.getElementById('waiting');
+    const [vx, vy, run] = waiting || isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     // Tall furniture can legitimately sort in front of someone walking behind it.
     // Fade only the overlapping piece so the player stays visible while navigating.
@@ -248,14 +327,18 @@ export class HouseScene extends Phaser.Scene {
         Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, furniture.getBounds());
       furniture.setAlpha(coversPlayer ? 0.4 : 1);
     }
+    if (!waiting) this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving, 'house');
+    for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
     const s = this.spotAt();
     if (own && !this.placing && !this.editing) setHint(isPanelOpen() ? null : s === 'bed' ? 'E: sleep and see your day' : s === 'desk' ? 'E: open your task book' : s === 'case' ? 'E: open the card case' : null);
+    if (waiting) return; // still knocking — stay put until accepted / cancelled
     const { x, y } = this.player;
     if (y > FLOOR.y1 + 40 && x > DOOR.x0 && x < DOOR.x1) { this.exiting = true; this.leaveToGarden(); }
     else if (own && x > FLOOR.x1 - 10 && y > HALL.y0 && y < HALL.y1 + 20) { this.player.x = FLOOR.x1 - 50; this.player.setFacing('left', false); friendsPanel(); }
     else if (!own && x < FLOOR.x0 + 10 && y > HALL.y0 && y < HALL.y1 + 20) { this.exiting = true; this.leaveToOwnHome(); }
   }
   private leaveToOwnHome() {
+    detachDomain(this.ownerId);
     this.cameras.main.fadeOut(250, 11, 15, 10);
     this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }));
   }

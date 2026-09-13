@@ -1,8 +1,8 @@
-/** WebSocket client for one garden room. Movement is throttled to ~12 updates/s and only sent on change. */
-export interface PeerState { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing?: boolean }
+/** WebSocket client for one owner's house+garden domain. Movement is throttled to ~12 updates/s and only sent on change. */
+export interface PeerState { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing?: boolean; area?: 'house' | 'garden' }
 type Handler = {
   roster: (you: number, peers: PeerState[]) => void; join: (p: PeerState) => void; leave: (id: number) => void;
-  move: (m: { id: number; x: number; y: number; dir: string; moving: boolean }) => void; chat: (id: number, text: string) => void; typing: (id: number, on: boolean) => void;
+  move: (m: { id: number; x: number; y: number; dir: string; moving: boolean; area?: 'house' | 'garden' }) => void; chat: (id: number, text: string) => void; typing: (id: number, on: boolean) => void;
   emote: (id: number, kind: string) => void; knocking: () => void; knock: (p: { id: number; name: string; character: number }) => void; denied: () => void;
 };
 
@@ -30,13 +30,15 @@ export class Net {
     };
     this.ws.onclose = () => { if (!this.closed) setTimeout(() => this.connect(), 2000); };
   }
-  move(x: number, y: number, dir: string, moving: boolean) {
+  move(x: number, y: number, dir: string, moving: boolean, area: 'house' | 'garden' = 'garden') {
     const now = performance.now();
-    const key = `${Math.round(x)},${Math.round(y)},${dir},${moving}`;
+    const key = `${Math.round(x)},${Math.round(y)},${dir},${moving},${area}`;
     if (key === this.last || now - this.lastSent < 80) return;
     this.last = key; this.lastSent = now;
-    this.send({ t: 'move', x: Math.round(x), y: Math.round(y), dir, moving });
+    this.send({ t: 'move', x: Math.round(x), y: Math.round(y), dir, moving, area });
   }
+  /** Clear the move dedupe so the next update always goes out (e.g. after House ↔ Garden). */
+  resetMoveThrottle() { this.last = ''; this.lastSent = 0; }
   chat(text: string) { this.send({ t: 'chat', text }); }
   typing(on: boolean) { this.send({ t: 'typing', on }); }
   emote(kind: string) { this.send({ t: 'emote', kind }); }
