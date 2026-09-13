@@ -211,7 +211,7 @@ export class GardenScene extends Phaser.Scene {
         for (let attempt = 0; attempt < 15 && !place(key, x, y, height, collider); attempt++) { x += rnd.realInRange(-30, 30); y += rnd.realInRange(-30, 30); }
       }
     };
-    scatter(rnd.between(5, 10), ['decor_tree_emerald', 'decor_tree_lime'], [150, 220], [140, 170], 'trunk');
+    scatter(rnd.between(10, 20), ['decor_tree_emerald', 'decor_tree_lime'], [150, 220], [140, 170], 'trunk');
     const treeAnchors = placed.slice(); // bushes cluster near these like natural undergrowth
     // Rocks: a few small clusters of 2-3 sitting close together, instead of lone rocks scattered everywhere.
     const rockKeys = ['decor_rock_1', 'decor_rock_2', 'decor_rock_3', 'decor_rock_4'];
@@ -229,7 +229,7 @@ export class GardenScene extends Phaser.Scene {
     // Bushes: small ground clutter (well under the player's ~91px garden height), clustered around
     // a random tree instead of scattered independently across the margin.
     const bushKeys = ['decor_bush_1', 'decor_bush_2', 'decor_bush_3', 'decor_bush_4'];
-    const bushCount = rnd.between(6, 10);
+    const bushCount = rnd.between(12, 20);
     for (let i = 0; i < bushCount && treeAnchors.length; i++) {
       const anchor = treeAnchors[rnd.between(0, treeAnchors.length - 1)];
       const height = rnd.between(30, 52);
