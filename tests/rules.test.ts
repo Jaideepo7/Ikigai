@@ -24,10 +24,9 @@ test('levels 0-100 + garden size', () => {
   assert.equal(gardenTiles(0), 12); assert.equal(gardenTiles(4), 12); assert.equal(gardenTiles(5), 13); assert.equal(gardenTiles(100), 32); assert.equal(gardenTiles(150), 32);
   assert.equal(plotsUnlocked(0), 6); assert.equal(plotsUnlocked(10), 16);
 });
-test('growth: seed -> twig after 10s -> young at half -> mature, trees take twice as long', () => {
-  const rose = plantById(1)!, oak = plantById(21)!;
+test('growth: seed -> twig after 10s -> young at half -> mature', () => {
+  const rose = plantById(1)!;
   assert.equal(growMs(rose, 50), 10 * 60_000); assert.equal(growMs(rose, 100), 20 * 60_000); assert.equal(growMs(rose, 200), 30 * 60_000);
-  assert.equal(growMs(oak, 200), 60 * 60_000);
   const t0 = 1_000_000, p = { plant_id: 1, stage: 0, planted_at: t0, ready_at: t0 + 600_000 };
   assert.equal(plantStage(p, t0 + 5_000), 0);
   assert.equal(plantStage(p, t0 + SPROUT_MS), 1);
@@ -37,7 +36,16 @@ test('growth: seed -> twig after 10s -> young at half -> mature, trees take twic
   assert.equal(plantStage({ plant_id: 1, stage: 3, planted_at: null, ready_at: null }, t0), STAGES);
   assert.equal(plantStage({ plant_id: null, stage: 0, planted_at: null, ready_at: null }, t0), -1);
   assert.deepEqual(plantReward(rose, 50), { xp: 15, coins: 8 }); assert.deepEqual(plantReward(rose, 200), { xp: 30, coins: 15 });
-  assert.equal(PLANTS.length, 32); assert.equal(PLANTS.filter((x) => x.kind === 'tree').length, 12);
+  assert.equal(PLANTS.length, 20); assert.ok(PLANTS.every((x) => x.kind === 'flower'));
+});
+test('retired trees cannot be bought or planted and never appear in shop rotations', () => {
+  for (let id = 21; id <= 32; id++) assert.equal(plantById(id), undefined);
+  for (let day = 1; day <= 100; day++) {
+    const { plants } = shopRotation(day, `2026-09-${day}`);
+    assert.equal(plants.length, 4);
+    assert.equal(new Set(plants).size, 4);
+    assert.ok(plants.every((id) => plantById(id)?.kind === 'flower'));
+  }
 });
 test('fence autotiling covers every neighbour combination', () => {
   assert.equal(fencePiece(false, false, false, false), 'post');

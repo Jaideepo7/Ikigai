@@ -58,6 +58,7 @@ export class GardenScene extends Phaser.Scene {
       ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences }
       : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
     if (!this.view) return this.scene.start('House', { spawn: 'center' });
+    this.view.plots = this.view.plots.filter((plot) => !plot.plant_id || plantById(plot.plant_id));
 
     // ---- layout ----
     this.n = gardenTiles(this.view.owner.level);

@@ -361,7 +361,7 @@ export function mapPanel() {
 // ---------- inventory ----------
 export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' | 'seasons' = 'seeds') {
   const m = me();
-  const seeds = m.inventory.filter((i) => i.qty > 0);
+  const seeds = m.inventory.filter((i) => i.qty > 0 && plantById(i.plant_id));
   const atHome = (() => { const sc = activeScene() as { scene: { key: string }; ownerId?: number } | undefined; return sc?.scene.key === 'House' && sc.ownerId === me().user.id; })();
   const body = tab === 'seeds'
     ? `<div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" title="${pl.name} seeds"><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.kind} · ${pl.rarity}</span><span class="qty num">×${s.qty}</span></div>`; }).join('')}${Array.from({ length: Math.max(0, 8 - seeds.length) }, () => `<div class="slot empty">${ico('seedbag', 'bag dim')}<span class="nm">empty</span></div>`).join('')}</div><p class="sub" style="margin-top:10px">Walk onto a plot in your garden and press E to plant a seed. Buy more in the shop (Q).</p>`
@@ -390,6 +390,8 @@ const hhmm = (ms: number) => `${Math.floor(ms / 3600_000)}:${String(Math.floor((
 export async function shopPanel(tab: ShopTab = 'shop') {
   let info: ShopInfo;
   try { info = await api.get<ShopInfo>('/api/shop'); } catch (e) { return err(e); }
+  info.plants = info.plants.filter((id) => plantById(id));
+  info.collected = info.collected.filter((id) => plantById(id));
   const m = me(), u = m.user, owned = new Set(info.ownedCards), collected = new Set(info.collected);
   const qty = (id: number) => m.inventory.find((i) => i.plant_id === id)?.qty ?? 0;
   const fqty = (id: number) => m.furniture.find((f) => f.furniture_id === id)?.qty ?? 0;
@@ -590,8 +592,8 @@ export function plotDialog(tx: number, ty: number, plot: Plot | null) {
       ? `<h2>🌱 Empty ground</h2><p class="sub">All ${unlocked} plots for level ${lv} are in use. Level up to unlock more, or grassify a plot you no longer need.</p>`
       : `<h2>⛏ Hoe a plot here?</h2><p class="sub">Tile ${tx + 1},${ty + 1} · plot ${owned + 1} of ${unlocked} unlocked · free</p><div class="form-actions"><button class="btn sage" id="hoe">Hoe the ground</button></div>`;
   } else if (!plot.plant_id) {
-    const seeds = m.user.is_admin ? PLANTS.map((p) => ({ plant_id: p.id, qty: Infinity })) : m.inventory.filter((i) => i.qty > 0);
-    html = `<h2>🌱 Plant a seed</h2><p class="sub">Pick something from your inventory. Flowers take ${GROWTH_OPTIONS.find((g) => g.value === m.user.growth)?.minutes} min, trees twice that.</p><div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<button class="slot seed" data-plant="${pl.id}"><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.kind}</span><span class="qty num">×${m.user.is_admin ? '∞' : s.qty}</span></button>`; }).join('') || '<p class="sub">No seeds. Visit the shop from your house (Q).</p>'}</div>
+    const seeds = m.user.is_admin ? PLANTS.map((p) => ({ plant_id: p.id, qty: Infinity })) : m.inventory.filter((i) => i.qty > 0 && plantById(i.plant_id));
+    html = `<h2>🌱 Plant a seed</h2><p class="sub">Pick something from your inventory. Flowers take ${GROWTH_OPTIONS.find((g) => g.value === m.user.growth)?.minutes} min to mature.</p><div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<button class="slot seed" data-plant="${pl.id}"><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.kind}</span><span class="qty num">×${m.user.is_admin ? '∞' : s.qty}</span></button>`; }).join('') || '<p class="sub">No seeds. Visit the shop from your house (Q).</p>'}</div>
       <div class="form-actions"><button class="btn rose sm" id="grass">🌿 Grassify (remove plot)</button></div>`;
   } else {
     const pl = plantById(plot.plant_id)!, now = Date.now(), stage = plantStage(plot, now), names = ['Seed', 'Twig', 'Young', 'Fully grown'], r = plantReward(pl, m.user.growth);

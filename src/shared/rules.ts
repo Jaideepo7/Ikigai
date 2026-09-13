@@ -64,11 +64,11 @@ export const STAGES = 3; // stage 0 seed (bare soil), 1 twig, 2 young, 3 mature
 export const SPROUT_MS = 10_000;
 export const WITHER_MAX = 4;
 export const FREEZES_PER_MONTH = 2;
-/** Growth pace (settings): minutes for a flower to mature (trees take twice as long) and the harvest reward multiplier. */
+/** Growth pace (settings): minutes for a flower to mature and the harvest reward multiplier. */
 export const GROWTH_OPTIONS = [
-  { value: 50, label: 'Quick', minutes: 10, mult: 1, desc: '10 min flowers · 20 min trees · normal reward' },
-  { value: 100, label: 'Normal', minutes: 20, mult: 1.5, desc: '20 min flowers · 40 min trees · 1.5× reward' },
-  { value: 200, label: 'Patient', minutes: 30, mult: 2, desc: '30 min flowers · 1 h trees · 2× reward' },
+  { value: 50, label: 'Quick', minutes: 10, mult: 1, desc: '10 min flowers · normal reward' },
+  { value: 100, label: 'Normal', minutes: 20, mult: 1.5, desc: '20 min flowers · 1.5× reward' },
+  { value: 200, label: 'Patient', minutes: 30, mult: 2, desc: '30 min flowers · 2× reward' },
 ] as const;
 const growthOpt = (growth: number) => GROWTH_OPTIONS.find((g) => g.value === growth) ?? GROWTH_OPTIONS[1];
 export function growMs(plant: Plant, growth: number): number { return growthOpt(growth).minutes * 60_000 * (plant.kind === 'tree' ? 2 : 1); }
@@ -96,16 +96,13 @@ export function fencePiece(n: boolean, e: boolean, s: boolean, w: boolean): Fenc
 export const FENCE_COLORS = ['brown', 'dark_brown', 'light_brown', 'black', 'dark_grey', 'light_grey', 'white'] as const;
 export type FenceColor = (typeof FENCE_COLORS)[number];
 export interface FenceTile { tx: number; ty: number; kind: 'fence' | 'gate' }
-/** Starter layout: a fenced ring one tile in from the edge with a gate at the top, two grown trees in the corners. */
+/** Starter layout: a fenced ring one tile in from the edge with a gate at the top. */
 export function defaultFences(n: number): FenceTile[] {
   const out: FenceTile[] = [];
   const gate = Math.floor(n / 2);
   for (let x = 1; x <= n - 2; x++) { out.push({ tx: x, ty: 1, kind: x === gate ? 'gate' : 'fence' }); out.push({ tx: x, ty: n - 2, kind: 'fence' }); }
   for (let y = 2; y <= n - 3; y++) { out.push({ tx: 1, ty: y, kind: 'fence' }); out.push({ tx: n - 2, ty: y, kind: 'fence' }); }
   return out;
-}
-export function defaultTrees(n: number): { tx: number; ty: number; plant_id: number }[] {
-  return [{ tx: 2, ty: n - 3, plant_id: 21 }, { tx: n - 3, ty: n - 3, plant_id: 29 }];
 }
 
 // ---------- daily spin ----------
@@ -123,15 +120,12 @@ export function spinPayout(reels: Reel[], streak: number): { coins: number; gems
 export type Rarity = 'common' | 'uncommon' | 'rare' | 'epic';
 export interface Plant { id: number; name: string; kind: 'flower' | 'tree'; rarity: Rarity; price: number }
 const F = (id: number, name: string, rarity: Rarity, price: number): Plant => ({ id, name, kind: 'flower', rarity, price });
-const TR = (id: number, name: string, rarity: Rarity, price: number): Plant => ({ id, name, kind: 'tree', rarity, price });
-/** ids 1-20 are the flower sheet (row-major), 21-32 the tree sheet. Sprite key = `flower_<id>` / `tree_<id>`. */
+/** Plantable flowers. Retired tree IDs 21-32 must not be reused. */
 export const PLANTS: Plant[] = [
   F(1, 'Red Rose', 'common', 70), F(2, 'Morning Glory', 'common', 60), F(3, 'Bluebell', 'common', 65), F(4, 'White Tulip', 'common', 60), F(5, 'Red Poppy', 'common', 70),
   F(6, 'Narcissus', 'common', 65), F(7, 'Pink Hibiscus', 'common', 80), F(8, 'Pink Peony', 'common', 85), F(9, 'Forget-me-not', 'common', 60), F(10, 'Marigold', 'common', 65),
   F(11, 'Blue Lupine', 'uncommon', 120), F(12, 'Pink Tulip', 'uncommon', 110), F(13, 'Orange Daisy', 'uncommon', 110), F(14, 'Cornflower', 'uncommon', 120), F(15, 'Goldenrod', 'uncommon', 115),
   F(16, 'Blue Iris', 'uncommon', 130), F(17, 'Hydrangea', 'uncommon', 140), F(18, 'Buttercup', 'uncommon', 110), F(19, 'Yellow Mimosa', 'uncommon', 135), F(20, 'Lily of the Valley', 'uncommon', 150),
-  TR(21, 'Oak', 'uncommon', 200), TR(22, 'Elm', 'uncommon', 210), TR(23, 'Autumn Maple', 'uncommon', 240), TR(24, 'Bonsai Pine', 'uncommon', 260), TR(25, 'Spruce', 'uncommon', 220), TR(26, 'Willow', 'uncommon', 250),
-  TR(27, 'Palm', 'rare', 320), TR(28, 'Old Oak', 'rare', 340), TR(29, 'Cherry Blossom', 'rare', 420), TR(30, 'Apple Tree', 'rare', 380), TR(31, 'Dogwood', 'rare', 400), TR(32, 'Blue Spruce', 'rare', 500),
 ];
 export const plantById = (id: number) => PLANTS.find((p) => p.id === id);
 export const plantSprite = (p: Plant) => `${p.kind}_${p.id}`;
@@ -201,7 +195,7 @@ export const SHOP_PLANTS = 4, SHOP_FURNITURE = 4, SHOP_CARD_CHANCE = 0.3;
 export function shopRotation(userId: number, day: string): { plants: number[]; furniture: number[]; card: number | null } {
   const rnd = seeded(`${userId}:${day}`);
   const pick = <T>(pool: T[], n: number) => { const p = [...pool], out: T[] = []; while (out.length < n && p.length) out.push(p.splice(Math.floor(rnd() * p.length), 1)[0]); return out; };
-  const plants = [...pick(PLANTS.filter((p) => p.rarity === 'common'), 2), ...pick(PLANTS.filter((p) => p.rarity === 'uncommon'), 1), ...pick(PLANTS.filter((p) => p.rarity === 'rare'), 1)].map((p) => p.id);
+  const plants = [...pick(PLANTS.filter((p) => p.rarity === 'common'), 2), ...pick(PLANTS.filter((p) => p.rarity === 'uncommon'), 2)].map((p) => p.id);
   const furniture = pick(FURNITURE, SHOP_FURNITURE).map((f) => f.id);
   const card = rnd() < SHOP_CARD_CHANCE ? CARDS[Math.floor(rnd() * CARDS.length)].id : null;
   return { plants, furniture, card };

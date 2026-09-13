@@ -22,7 +22,6 @@ class Boot extends Phaser.Scene {
     this.load.image('tinytown_img', '/assets/tiles/tinytown.png');
     for (let i = 0; i < CHARACTERS; i++) this.load.spritesheet(`char_${i}`, `/assets/chars/char_${i}.png?v=160x140`, { frameWidth: FRAME.w, frameHeight: FRAME.h });
     for (let i = 1; i <= 20; i++) this.load.image(`flower_${i}`, `/assets/plants/flower_${i}.png`);
-    for (let i = 21; i <= 32; i++) this.load.image(`tree_${i}`, `/assets/plants/tree_${i}.png`);
     this.load.image('twig', '/assets/plants/twig.png');
     for (const p of FENCE_PIECES) for (const c of FENCE_COLORS) this.load.image(`fence_${p}_${c}`, `/assets/fence/${p}_${c}.png`);
     for (const f of FURNITURE) this.load.image(`f_${f.id}`, `/assets/furniture/f_${f.id}.png`);

@@ -3,7 +3,7 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import {
   START, DAILY_CAP, PLANTS, CARDS, FURNITURE, GEM_PRICE_COINS, REEL_WEIGHTS, STAGES, MAX_LEVEL,
   WITHER_MAX, FREEZES_PER_MONTH, GROWTH_OPTIONS, growMs, plantReward, taskReward, levelFromXp, xpForLevel, gardenTiles, plotsUnlocked, caseSlots, spinPayout, dayKey, addDays, daysBetween, weightedPick,
-  SEASON_CHANGE_GEMS, SEASONS, FENCE_COLORS, defaultFences, defaultTrees, STARTER_FURNITURE, furnitureById, furnitureFits, shopRotation,
+  SEASON_CHANGE_GEMS, SEASONS, FENCE_COLORS, defaultFences, STARTER_FURNITURE, furnitureById, furnitureFits, shopRotation,
   type Reel, type Season, type FenceColor, type PlacedFurniture,
 } from '../src/shared/rules';
 
@@ -57,14 +57,18 @@ async function settlePlots(db: D1Database, userId: number, growth: number, now: 
   ]);
   await Promise.all([bumpStat(db, userId, 'plants_grown', done.length), bumpStat(db, userId, 'xp_earned', xp), bumpStat(db, userId, 'coins_earned', coins)]);
 }
-/** First visit after signup (or after the v3 migration): starter fence ring, two grown trees, bed + desk + bookcase. */
+/** First visit after signup (or after the v3 migration): starter fence ring, bed + desk + bookcase. */
 async function ensureInit(db: D1Database, u: UserRow) {
+  // Also clean existing accounts on access if code is deployed before migration 0006.
+  await db.batch([
+    db.prepare('DELETE FROM plots WHERE user_id=? AND plant_id BETWEEN 21 AND 32').bind(u.id),
+    db.prepare('DELETE FROM inventory WHERE user_id=? AND plant_id BETWEEN 21 AND 32').bind(u.id),
+  ]);
   if (u.garden_init) return;
-  const n = gardenTiles(userLevel(u)), now = Date.now();
+  const n = gardenTiles(userLevel(u));
   const stmts: D1PreparedStatement[] = [];
   if (!(await db.prepare('SELECT 1 FROM fences WHERE user_id=?').bind(u.id).first())) {
     for (const f of defaultFences(n)) stmts.push(db.prepare('INSERT OR IGNORE INTO fences (user_id,tx,ty,kind) VALUES (?,?,?,?)').bind(u.id, f.tx, f.ty, f.kind));
-    for (const t of defaultTrees(n)) stmts.push(db.prepare('INSERT OR IGNORE INTO plots (user_id,tx,ty,plant_id,stage,planted_at,ready_at) VALUES (?,?,?,?,?,?,NULL)').bind(u.id, t.tx, t.ty, t.plant_id, STAGES, now));
   }
   if (!(await db.prepare('SELECT 1 FROM furniture_placed WHERE user_id=?').bind(u.id).first())) {
     for (const s of STARTER_FURNITURE) {

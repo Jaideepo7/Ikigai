@@ -156,9 +156,12 @@ export class HouseScene extends Phaser.Scene {
         im.on('pointerdown', (ptr: Phaser.Input.Pointer, _lx: number, _ly: number, ev: Phaser.Types.Input.EventData) => { if (this.editing && !this.placing && !isPanelOpen()) { ev.stopPropagation(); this.openMenu(p, ptr); } });
       }
       this.furnitureSprites.push(im);
-      if (f.kind !== 'rug' && f.kind !== 'walk') this.furnitureBodies.push(solidRect(this, this.walls, ROOM_X0 + p.cx * T + 6, ROOM_Y0 + p.cy * T + 6, f.w * T - 12, f.h * T - 12));
+      const bodyW = Math.max(f.w * T, im.displayWidth) - 12;
+      const bodyH = Math.min(im.displayHeight, f.h * T * FURNITURE_SCALE) - 12;
+      const bodyX = x - bodyW / 2, bodyY = y - bodyH - 6;
+      if (f.kind !== 'rug' && f.kind !== 'walk') this.furnitureBodies.push(solidRect(this, this.walls, bodyX, bodyY, bodyW, bodyH));
       const spot = f.kind === 'bed' ? 'bed' : f.kind === 'desk' ? 'desk' : f.kind === 'bookcase' ? 'case' : null;
-      if (spot && own) this.spots.push({ kind: spot, x1: ROOM_X0 + (p.cx - 1) * T, y1: ROOM_Y0 + (p.cy - 1) * T, x2: ROOM_X0 + (p.cx + f.w + 1) * T, y2: ROOM_Y0 + (p.cy + f.h + 1) * T });
+      if (spot && own) this.spots.push({ kind: spot, x1: bodyX - T, y1: bodyY - T, x2: bodyX + bodyW + T, y2: y + T });
     }
   }
   private spotAt(): Spot | null {
@@ -226,6 +229,14 @@ export class HouseScene extends Phaser.Scene {
     const own = this.ownerId === me().user.id;
     const [vx, vy, run] = isPanelOpen() || typingInDom() ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
+    // Tall furniture can legitimately sort in front of someone walking behind it.
+    // Fade only the overlapping piece so the player stays visible while navigating.
+    const playerBounds = this.player.getBounds();
+    for (const furniture of this.furnitureSprites) {
+      const coversPlayer = furniture.depth > this.player.y &&
+        Phaser.Geom.Intersects.RectangleToRectangle(playerBounds, furniture.getBounds());
+      furniture.setAlpha(coversPlayer ? 0.4 : 1);
+    }
     const s = this.spotAt();
     if (own && !this.placing && !this.editing) setHint(isPanelOpen() ? null : s === 'bed' ? 'E: sleep and see your day' : s === 'desk' ? 'E: open your task book' : s === 'case' ? 'E: open the card case' : null);
     const { x, y } = this.player;
