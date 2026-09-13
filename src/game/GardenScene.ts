@@ -192,6 +192,13 @@ export class GardenScene extends Phaser.Scene {
       placed.push({ x, y, r });
       return true;
     };
+    // A point out in the margin/below-fence band, never inside the fenced garden.
+    const zonePos = () => {
+      const zone = rnd.frac();
+      if (zone < 0.42) return { x: gx - rnd.realInRange(20, MARGIN * T - 20), y: gy + rnd.realInRange(0, size) };
+      if (zone < 0.84) return { x: gx + size + rnd.realInRange(20, MARGIN * T - 20), y: gy + rnd.realInRange(0, size) };
+      return { x: gx + rnd.realInRange(-20, size + 20), y: gy + size + rnd.realInRange(40, 150) };
+    };
     // Random count and scatter — left margin, right margin, or below the fence — never inside it.
     const scatter = (count: number, keys: string[], sideHeight: [number, number], edgeHeight: [number, number], collider: 'trunk' | 'body' | 'none') => {
       for (let i = 0; i < count; i++) {
@@ -206,17 +213,29 @@ export class GardenScene extends Phaser.Scene {
     };
     scatter(rnd.between(5, 10), ['decor_tree_emerald', 'decor_tree_lime'], [150, 220], [140, 170], 'trunk');
     const treeAnchors = placed.slice(); // bushes cluster near these like natural undergrowth
-    scatter(rnd.between(3, 6), ['decor_rock_1', 'decor_rock_2', 'decor_rock_3', 'decor_rock_4'], [50, 85], [45, 70], 'body');
-    // Bushes: small ground clutter (half to three-quarters of the player's ~91px garden height at
-    // most), clustered around a random tree instead of scattered independently across the margin.
+    // Rocks: a few small clusters of 2-3 sitting close together, instead of lone rocks scattered everywhere.
+    const rockKeys = ['decor_rock_1', 'decor_rock_2', 'decor_rock_3', 'decor_rock_4'];
+    for (let c = 0, clusterCount = rnd.between(2, 4); c < clusterCount; c++) {
+      const center = zonePos();
+      for (let i = 0, n = rnd.between(2, 3); i < n; i++) {
+        const height = rnd.between(45, 75);
+        const key = rockKeys[rnd.between(0, rockKeys.length - 1)];
+        for (let attempt = 0; attempt < 15; attempt++) {
+          const angle = rnd.frac() * Math.PI * 2, dist = rnd.realInRange(6, 32);
+          if (place(key, center.x + Math.cos(angle) * dist, center.y + Math.sin(angle) * dist, height, 'body')) break;
+        }
+      }
+    }
+    // Bushes: small ground clutter (well under the player's ~91px garden height), clustered around
+    // a random tree instead of scattered independently across the margin.
     const bushKeys = ['decor_bush_1', 'decor_bush_2', 'decor_bush_3', 'decor_bush_4'];
     const bushCount = rnd.between(6, 10);
     for (let i = 0; i < bushCount && treeAnchors.length; i++) {
       const anchor = treeAnchors[rnd.between(0, treeAnchors.length - 1)];
-      const height = rnd.between(40, 68);
+      const height = rnd.between(30, 52);
       for (let attempt = 0; attempt < 15; attempt++) {
         const angle = rnd.frac() * Math.PI * 2;
-        const dist = anchor.r + rnd.realInRange(10, 55);
+        const dist = anchor.r + rnd.realInRange(10, 50);
         const key = bushKeys[rnd.between(0, bushKeys.length - 1)];
         if (place(key, anchor.x + Math.cos(angle) * dist, anchor.y + Math.sin(angle) * dist, height, 'none')) break;
       }
