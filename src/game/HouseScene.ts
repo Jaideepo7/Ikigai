@@ -56,12 +56,14 @@ export class HouseScene extends Phaser.Scene {
     this.cameras.main.setAlpha(1);
     this.cameras.main.fadeIn(200, 11, 15, 10);
     const own = this.ownerId === me().user.id;
+    let ownerName = me().user.username;
 
     if (!own) {
       const view = await api.get<HouseView>(`/api/house/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
       if (!view) { detachDomain(this.ownerId); this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); return; }
       this.visitPlaced = view.placed;
       this.visitName = view.owner.username;
+      ownerName = view.owner.username;
     }
 
     this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
@@ -69,7 +71,9 @@ export class HouseScene extends Phaser.Scene {
     this.add.image(0, 0, 'home_bg').setOrigin(0).setDepth(-20);
 
     this.drawHallways(own);
-    this.add.text((DOOR.x0 + DOOR.x1) / 2, FLOOR.y1 + 60, 'garden', { fontFamily: 'Pixelify Sans', fontSize: '14px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
+    const roomLabel = `${ownerName}'s room`;
+    const roomLabelSize = Math.max(9, Math.min(14, Math.floor(245 / roomLabel.length)));
+    this.add.text((DOOR.x0 + DOOR.x1) / 2, FLOOR.y1 + 60, roomLabel, { fontFamily: 'Pixelify Sans', fontSize: `${roomLabelSize}px`, color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
 
     this.walls = this.physics.add.staticGroup();
     const solid = (x: number, y: number, w: number, h: number) => solidRect(this, this.walls, x, y, w, h);
