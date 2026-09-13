@@ -564,7 +564,7 @@ export class GardenScene extends Phaser.Scene {
     }
     if (this.tipEl) this.updateTip(this.input.activePointer);
     if (document.getElementById('waiting')) return; // still knocking — stay in the garden until accepted / cancelled
-    if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir === 'up') {
+    if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir.startsWith('up')) {
       this.exiting = true;
       const ownerId = this.ownerId;
       const cam = this.cameras.main;

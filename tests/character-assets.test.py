@@ -18,8 +18,9 @@ class CharacterAssetsTest(unittest.TestCase):
         width, height = map(int, match.groups())
         for character in range(20):
             with Image.open(ROOT / f'public/assets/chars/char_{character}.png') as sheet:
-                self.assertEqual(sheet.size, (12 * width, height))
-                for frame in range(12):
+                frame_count = 24 if character in (4, 13) else 12
+                self.assertEqual(sheet.size, (frame_count * width, height))
+                for frame in range(frame_count):
                     with self.subTest(character=character, frame=frame):
                         alpha = sheet.getchannel('A').crop((frame * width, 0, (frame + 1) * width, height))
                         bounds = alpha.getbbox()

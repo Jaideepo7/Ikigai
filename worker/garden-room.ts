@@ -1,5 +1,6 @@
 import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index';
+import { DIRECTIONS, type Dir } from '../src/shared/movement';
 
 /**
  * One room per owner domain (house + garden). Relays move / chat / typing / emotes.
@@ -78,7 +79,7 @@ export class GardenRoom extends DurableObject<Env> {
     }
     if (peer.pending) return;
     if (m.t === 'move' && Number.isFinite(m.x) && Number.isFinite(m.y)) {
-      Object.assign(peer, { x: m.x, y: m.y, dir: String(m.dir).slice(0, 5), moving: !!m.moving, area: m.area === 'house' ? 'house' : 'garden' });
+      Object.assign(peer, { x: m.x, y: m.y, dir: DIRECTIONS.includes(m.dir as Dir) ? m.dir : peer.dir, moving: !!m.moving, area: m.area === 'house' ? 'house' : 'garden' });
       ws.serializeAttachment(peer);
       this.broadcast({ t: 'move', id: peer.id, x: peer.x, y: peer.y, dir: peer.dir, moving: peer.moving, area: peer.area }, ws);
     } else if (m.t === 'chat' && typeof m.text === 'string') {

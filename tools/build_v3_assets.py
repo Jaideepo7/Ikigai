@@ -59,7 +59,11 @@ def walk_strip(im):
     return out
 
 for i in range(20):
-    files = [Image.open(f).convert('RGBA') for f in sorted(glob.glob(D + f'Character_animation/c{i + 1}/*.png'))]
+    if i in (4, 13):
+        from build_character_walks import build_character
+        build_character(i + 1, portraits=not SPRITES_ONLY)
+        continue
+    files = [Image.open(f).convert('RGBA') for f in sorted(glob.glob(D + f'Character_animation/c{i + 1}/image*.png'))]
     walk = next(f for f in files if f.width > 1500)
     side = next(f for f in files if f.width <= 1500 and f.height > 800)
     front = next(f for f in files if f.width <= 1500 and f.height <= 800)
