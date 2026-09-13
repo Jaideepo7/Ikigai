@@ -18,13 +18,16 @@ me=$(req a GET /api/me)
 [ "$(echo "$me" | J "len(d['placed'])")" = "3" ]                  # bed, desk, bookcase
 [ "$(echo "$me" | J "d['user']['xp']")" = "0" ]
 tid=$(req a POST /api/tasks '{"name":"Read OS ch4","difficulty":2,"est_minutes":45,"start":true}' | J "d['id']")
-[ "$(req a POST /api/tasks/$tid/complete '{}' | J "d['error']")" = "Finish the focus session before you complete this task" ]
+# early complete is allowed while a focus session is running (no 2× until a pomodoro session finishes)
+r=$(req a POST /api/tasks/$tid/complete '{}'); echo "early complete: $r"
+[ "$(echo "$r" | J "d['xp']")" = "32" ]  # 20*1.75*0.9 (rushed) = 31.5 -> 32, no pomodoro double
+tid=$(req a POST /api/tasks '{"name":"Focus OS ch5","difficulty":2,"est_minutes":45,"start":true}' | J "d['id']")
 req a POST /api/pomodoro/complete "{\"task_id\":$tid,\"minutes\":25}" | J "d['ok']" >/dev/null
 r=$(req a POST /api/tasks/$tid/complete '{}'); echo "complete: $r"
-[ "$(echo "$r" | J "d['xp']")" = "64" ]  # 20*1.75*0.9 (1 min actual vs 45 est = rushed) = 31.5 -> 32, doubled for pomodoro
+[ "$(echo "$r" | J "d['xp']")" = "64" ]  # doubled for pomodoro
 [ "$(echo "$r" | J "d['streak']")" = "1" ]
 me=$(req a GET /api/me); echo "$me" | J "'coins',d['user']['coins'],'xp',d['user']['xp'],'daily',d['daily']"
-[ "$(echo "$me" | J "d['user']['coins']")" = "116" ]   # 100 + 16
+[ "$(echo "$me" | J "d['user']['coins']")" = "132" ]   # 100 + 16 (early) + 16 (pomo)
 # plots: hoe (free), taken tiles, bounds, plant, move, grassify
 req a POST /api/plots/hoe '{"tx":3,"ty":3}' | J "d['ok']" >/dev/null
 [ "$(req a POST /api/plots/hoe '{"tx":3,"ty":3}' | J "d['error']")" = "That tile is taken" ]

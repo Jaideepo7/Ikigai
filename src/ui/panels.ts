@@ -166,6 +166,7 @@ export function tasksPanel(folder: string | null = taskFolder, view: TaskView = 
 }
 async function completeTask(id: number) {
   const r = await api.post<{ xp: number; coins: number; capped: boolean; leveledUp: boolean; level: number; streak: number }>(`/api/tasks/${id}/complete`);
+  if (pomo?.taskId === id) { pomo = null; clearInterval(pomoTimer); }
   await refreshMe();
   sfx.coin();
   toast(`+${r.xp} XP · +${r.coins} coins${r.capped ? ' (daily cap reached)' : ''} · ${r.streak} day streak`, 'reward');
@@ -228,9 +229,28 @@ export function createTaskPanel(folder = '', dueDate = localDay()) {
 interface Pomo { phase: 'work' | 'break'; rep: number; reps: number; work: number; brk: number; endsAt: number; paused: number | null; taskId: number | null; done: boolean }
 let pomo: Pomo | null = null;
 let pomoTimer: number | undefined;
+/** Latest work/break/reps chosen in the panel (used for the ready clock + planned dots). */
+let pomoPlan = { work: 25, brk: 5, reps: 4 };
 export function isPomodoroActive() { return !!pomo && !pomo.done; }
 const mmss = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return `${String(Math.floor(s / 60)).padStart(2, '0')}:${String(s % 60).padStart(2, '0')}`; };
 const remaining = () => (pomo ? (pomo.paused !== null ? pomo.paused : pomo.endsAt - Date.now()) : 0);
+/** Split estimated work minutes into sessions so total work ≈ est (e.g. 90 min → 4 × 23 with 5-min breaks). */
+function planFocus(estMinutes: number, preferredWork: number, preferredBreak: number) {
+  const unit = Math.max(5, preferredWork);
+  const reps = Math.max(1, Math.min(16, Math.ceil(estMinutes / unit)));
+  const work = Math.max(5, Math.round(estMinutes / reps));
+  return { work, brk: Math.max(1, preferredBreak), reps };
+}
+function dotsHtml(reps: number, curRep = 0, curPhase: 'work' | 'break' | null = null, allDone = false) {
+  // work · break · work · … · work (no trailing break after the last session)
+  const n = Math.max(1, reps * 2 - 1);
+  return Array.from({ length: n }, (_, i) => {
+    const rep = Math.floor(i / 2) + 1, ph: 'work' | 'break' = i % 2 ? 'break' : 'work';
+    const cur = !allDone && curRep > 0 && rep === curRep && ph === curPhase;
+    const done = allDone || (curRep > 0 && (rep < curRep || (rep === curRep && ph === 'work' && curPhase === 'break')));
+    return `<span class="${cur ? 'on' : done ? 'done' : ''}"><i></i>${ph}</span>`;
+  }).join('');
+}
 function pomoTick() {
   if (!pomo || pomo.paused !== null || pomo.done) return;
   if (remaining() > 0) return renderPomo();
@@ -249,26 +269,30 @@ function startPomo(work: number, brk: number, reps: number, taskId: number | nul
 export function pomodoroPanel(taskId: number | null = null) {
   const u = me().user;
   const task = taskId !== null ? me().tasks.find((t) => t.id === taskId) : undefined;
-  let work = task ? task.est_minutes : u.pomo_work, brk = u.pomo_break, reps = task ? 1 : u.pomo_reps;
+  let work = u.pomo_work, brk = u.pomo_break, reps = u.pomo_reps;
+  if (task) ({ work, brk, reps } = planFocus(task.est_minutes, u.pomo_work, u.pomo_break));
   if (pomo && !pomo.done && (task ? pomo.taskId !== task.id : true)) { work = pomo.work; brk = pomo.brk; reps = pomo.reps; }
+  pomoPlan = { work, brk, reps };
+  const totalWork = work * reps;
   const p = openPanel(`<div class="pomo">
-    <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · 2× XP when completed</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
+    <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · ${num(totalWork)} min work across ${num(reps)} session${reps === 1 ? '' : 's'} · 2× XP when a session finishes before you complete</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
       <div class="face"><div class="time num" id="pt">${mmss(work * 60_000)}</div></div><div class="phase" id="pp">ready</div>
-      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset">■ Reset</button>${task ? `<button class="btn sage" id="p-done" data-task="${task.id}" disabled title="Finish the focus session first">Complete task</button>` : ''}</div>
-      <div class="dots" id="pd"></div><p class="sub" style="margin-top:10px">🔒 Garden access is disabled during an active focus session.</p></div>
+      <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset" type="button">■ Reset</button>${task ? `<button class="btn sage" id="p-done" data-task="${task.id}" type="button">Complete task</button>` : ''}</div>
+      <div class="dots" id="pd">${dotsHtml(reps)}</div><p class="sub" style="margin-top:10px">🔒 Garden access is disabled during an active focus session.</p></div>
     <div><h2>Settings</h2>
       <div class="stepper"><span>Work Duration</span><div><button data-k="work" data-d="-5">−</button><b class="num" id="s-work">${work} min</b><button data-k="work" data-d="5">+</button></div></div>
       <div class="stepper"><span>Break Duration</span><div><button data-k="brk" data-d="-1">−</button><b class="num" id="s-brk">${brk} min</b><button data-k="brk" data-d="1">+</button></div></div>
       <div class="stepper"><span>Repetitions</span><div><button data-k="reps" data-d="-1">−</button><b class="num" id="s-reps">${reps}</b><button data-k="reps" data-d="1">+</button></div></div>
-      <p class="sub">Settings apply when you press Start.${task ? '' : ' Saved as your defaults.'}</p>
+      <p class="sub">Settings apply when you press Start.${task ? ` Planned for about ${num(task.est_minutes)} min of pure work.` : ' Saved as your defaults.'}</p>
       <p class="sub">Lifetime: ${num(me().stats.pomodoros ?? 0)} sessions · ${num(me().stats.focus_minutes ?? 0)} focus minutes</p></div></div>`, 'wide');
   name('pomodoro');
   const vals = { work, brk, reps };
+  const syncPlan = () => { pomoPlan = { ...vals }; if (!pomo || pomo.done) { p.querySelector('#pt')!.textContent = mmss(vals.work * 60_000); p.querySelector('#pd')!.innerHTML = dotsHtml(vals.reps); } };
   p.querySelectorAll<HTMLElement>('.stepper button').forEach((b) => b.addEventListener('click', () => {
-    const k = b.dataset.k as keyof typeof vals, lim = { work: [5, 120], brk: [1, 60], reps: [1, 8] }[k];
+    const k = b.dataset.k as keyof typeof vals, lim = { work: [5, 120], brk: [1, 60], reps: [1, 16] }[k];
     vals[k] = Math.min(lim[1], Math.max(lim[0], vals[k] + Number(b.dataset.d)));
     p.querySelector(`#s-${k}`)!.textContent = k === 'reps' ? String(vals[k]) : `${vals[k]} min`;
-    if (!pomo || pomo.done) p.querySelector('#pt')!.textContent = mmss(vals.work * 60_000);
+    syncPlan();
   }));
   p.querySelector('#p-start')!.addEventListener('click', async () => {
     sfx.click();
@@ -277,9 +301,16 @@ export function pomodoroPanel(taskId: number | null = null) {
     if (!task) api.post('/api/me/settings', { pomo_work: vals.work, pomo_break: vals.brk, pomo_reps: vals.reps }).then(refreshMe).catch(() => {});
     renderPomo();
   });
-  p.querySelector('#p-reset')!.addEventListener('click', () => { pomo = null; clearInterval(pomoTimer); renderPomo(); });
+  p.querySelector('#p-reset')!.addEventListener('click', () => {
+    sfx.click();
+    pomo = null; clearInterval(pomoTimer);
+    p.querySelector('#pt')!.textContent = mmss(vals.work * 60_000);
+    p.querySelector('#pp')!.textContent = 'ready';
+    p.querySelector('#pd')!.innerHTML = dotsHtml(vals.reps);
+    (p.querySelector('#p-start') as HTMLButtonElement).textContent = '▶ Start';
+    renderMini();
+  });
   p.querySelector('#p-done')?.addEventListener('click', async () => {
-    if (!pomo?.done || pomo.taskId !== task!.id) return;
     const yes = await confirmDialog('Complete task', `Did you complete ${task!.name}?`, 'Completed!', 'Go back');
     if (!yes) return pomodoroPanel(task!.id);
     try { await completeTask(task!.id); pomo = null; clearInterval(pomoTimer); closePanel(); } catch (e) { err(e); }
@@ -294,10 +325,12 @@ function renderPomo() {
       pt.textContent = mmss(remaining());
       pp.textContent = pomo.done ? 'done ✓' : `${pomo.phase === 'work' ? 'work' : 'break'} · session ${pomo.rep} of ${pomo.reps}${pomo.paused !== null ? ' · paused' : ''}`;
       btn.textContent = pomo.done ? '▶ Start again' : pomo.paused !== null ? '▶ Resume' : '⏸ Pause';
-      dots.innerHTML = Array.from({ length: pomo.reps * 2 }, (_, i) => { const rep = Math.floor(i / 2) + 1, ph = i % 2 ? 'break' : 'work'; const cur = rep === pomo!.rep && ph === pomo!.phase && !pomo!.done; const done = pomo!.done || rep < pomo!.rep || (rep === pomo!.rep && ph === 'work' && pomo!.phase === 'break'); return `<span class="${cur ? 'on' : done ? 'done' : ''}"><i></i>${ph}</span>`; }).join('');
-    } else { pp.textContent = 'ready'; btn.textContent = '▶ Start'; dots.innerHTML = ''; }
-    const doneButton = p.querySelector<HTMLButtonElement>('#p-done');
-    if (doneButton) { const ready = !!pomo?.done && pomo.taskId === Number(doneButton.dataset.task); doneButton.disabled = !ready; doneButton.title = ready ? 'Complete this task' : 'Finish the focus session first'; }
+      dots.innerHTML = dotsHtml(pomo.reps, pomo.rep, pomo.phase, pomo.done);
+    } else {
+      pp.textContent = 'ready'; btn.textContent = '▶ Start';
+      pt.textContent = mmss(pomoPlan.work * 60_000);
+      dots.innerHTML = dotsHtml(pomoPlan.reps);
+    }
   }
   renderMini();
 }
@@ -610,7 +643,7 @@ const STEPS: [string, string][] = [
   ['Welcome to Ikigai 🌱', 'Your garden only grows when you do. Finish real tasks to earn XP and coins, then spend them on your garden and home.'],
   ['Move around', 'WASD or the arrow keys walk. Hold Shift to run. Press F to wave at friends.'],
   ['Your task book 📖', 'Press T (or E at your desk) to add tasks with a difficulty, due date and time estimate. Completing them pays XP + coins. Organize them in folders.'],
-  ['Focus timer ⏱', 'Press P for the Pomodoro timer, or ▶ on a task. A task started with the timer must finish its focus session first and then pays double XP. The garden is closed while you focus.'],
+  ['Focus timer ⏱', 'Press P for the Pomodoro timer, or ▶ on a task. Long tasks are split into work sessions with breaks so the total work time matches your estimate. You can complete a task early while the timer runs; finishing at least one focus session pays double XP. The garden is closed while you focus.'],
   ['The garden 🌿', 'Walk out the bottom door. Stand on a tile and press E to hoe a plot, plant a seed, or grassify it. Plants sprout in seconds and mature on a real timer - hover a plant to see it. Edit garden lets you place fences and gates and move things around.'],
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],

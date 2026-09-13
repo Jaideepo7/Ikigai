@@ -76,19 +76,20 @@ await page.click('[data-t="cards"]'); await page.waitForSelector('.collection');
 assert.equal(await page.locator('.shop-card-item').count(), 4);
 await page.keyboard.press('Escape');
 
-// tasks: normal completion, focus-timer guard
+// tasks: normal completion, early complete while focus is running, 2× after a pomodoro session
 const taskChecks = await page.evaluate(async () => {
   const post = (url, body) => fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
   const completeTask = await post('/api/tasks', { name: 'Complete check', description: '', folder: 'Tests', due_date: new Date().toISOString().slice(0, 10), priority: 3, difficulty: 1, est_minutes: 5, start: false }).then((r) => r.json());
   const doneStatus = (await post(`/api/tasks/${completeTask.id}/complete`, {})).status;
-  const focusTask = await post('/api/tasks', { name: 'Focus guard', description: '', folder: 'Tests', due_date: null, priority: 2, difficulty: 1, est_minutes: 5, start: true }).then((r) => r.json());
+  const focusTask = await post('/api/tasks', { name: 'Focus early', description: '', folder: 'Tests', due_date: null, priority: 2, difficulty: 1, est_minutes: 5, start: true }).then((r) => r.json());
   const early = await post(`/api/tasks/${focusTask.id}/complete`, {});
-  await post('/api/pomodoro/complete', { task_id: focusTask.id, minutes: 5 });
-  const afterFocus = await post(`/api/tasks/${focusTask.id}/complete`, {});
+  const focusTask2 = await post('/api/tasks', { name: 'Focus done', description: '', folder: 'Tests', due_date: null, priority: 2, difficulty: 1, est_minutes: 5, start: true }).then((r) => r.json());
+  await post('/api/pomodoro/complete', { task_id: focusTask2.id, minutes: 5 });
+  const afterFocus = await post(`/api/tasks/${focusTask2.id}/complete`, {});
   const latest = await fetch('/api/me').then((r) => r.json());
   return { doneStatus, earlyStatus: early.status, afterFocusStatus: afterFocus.status, taskStillShown: latest.tasks.some((t) => t.id === completeTask.id) };
 });
-assert.deepEqual(taskChecks, { doneStatus: 200, earlyStatus: 400, afterFocusStatus: 200, taskStillShown: false });
+assert.deepEqual(taskChecks, { doneStatus: 200, earlyStatus: 200, afterFocusStatus: 200, taskStillShown: false });
 
 // furniture: inventory shows counts, placement through the API respects the gap rule, room draws it
 await page.keyboard.press('i');

@@ -281,7 +281,6 @@ app.post('/api/tasks/:id/complete', async (c) => {
   const t = await db.prepare('SELECT * FROM tasks WHERE id=? AND user_id=?').bind(c.req.param('id'), u.id).first<any>();
   if (!t) return bad('No such task', 404);
   if (t.completed_at) return bad('Already completed');
-  if (t.started_at && !t.pomodoro) return bad('Finish the focus session before you complete this task');
   const b = await c.req.json().catch(() => ({}));
   let actual: number | null = Number.isFinite(b.actual_minutes) && b.actual_minutes > 0 ? Math.round(b.actual_minutes) : null;
   if (actual === null && t.started_at) actual = Math.max(1, Math.round((now - t.started_at) / 60_000));
