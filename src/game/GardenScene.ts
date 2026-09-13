@@ -1,13 +1,12 @@
 import Phaser from 'phaser';
 import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { Net, type PeerState } from './net';
-import { attachDomain, detachDomain, domainNet, domainPeer } from './domainNet';
+import { attachDomain, detachDomain, domainPeer } from './domainNet';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
-import { isPanelOpen, isPomodoroActive, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
+import { isPanelOpen, isPomodoroActive, plotDialog, setHint, setVisitBadge, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
 import { gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
 import { T, W, H, TT, layerFrom, solidRect } from './tiles';
-import { sfx } from '../ui/audio';
 
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
@@ -132,8 +131,10 @@ export class GardenScene extends Phaser.Scene {
     this.events.once('shutdown', () => this.teardown());
     this.connect(own);
     setNavMode('garden');
-    if (own) gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
-    setHint(own ? 'E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run · walk up to the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door = their home`);
+    if (own) { gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() }); setVisitBadge(null); }
+    else setVisitBadge(`Visiting ${this.view.owner.username}'s garden`);
+    if (own) setHint('E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run');
+    else setHint(null);
     this.ready = true;
   }
 
@@ -371,11 +372,18 @@ export class GardenScene extends Phaser.Scene {
       if (this.exiting) return;
       this.exiting = true;
       waitingOverlay(null);
+      setVisitBadge(null);
       detachDomain(this.ownerId);
       this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id });
     };
     this.net = attachDomain(this.ownerId, 'garden', {
-      roster: (_you, peers) => { waitingOverlay(null); this.peers.forEach((p) => p.destroy()); this.peers.clear(); peers.forEach((p) => this.addPeer(p)); },
+      roster: (_you, peers) => {
+        waitingOverlay(null);
+        this.peers.forEach((p) => p.destroy()); this.peers.clear();
+        peers.forEach((p) => this.addPeer(p));
+        this.net?.resetMoveThrottle();
+        this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'garden');
+      },
       join: (p) => { this.addPeer(p); if (own) toast(`${p.name} came to visit`); },
       leave: (id) => { this.peers.get(id)?.destroy(); this.peers.delete(id); },
       move: (m) => {
@@ -392,17 +400,19 @@ export class GardenScene extends Phaser.Scene {
       chat: (id, text) => { const p = id === me().user.id ? this.player : this.peers.get(id); if (p) { p.typing = false; p.say(text); } },
       typing: (id, on) => { const p = this.peers.get(id); if (!p) return; if (on) { p.say('. . .', 0); p.typing = true; } else if (p.typing) { p.typing = false; p.clearBubble(); } },
       emote: (id, kind) => this.peers.get(id)?.emote(kind),
-      knocking: () => { sfx.chime(); waitingOverlay(this.view.owner.username, () => goHome()); },
-      knock: (p) => { sfx.chime(); knockPrompt(p.name, p.character, (accept) => domainNet()?.visit(p.id, accept)); },
-      denied: () => { waitingOverlay(null); toast(`${this.view.owner.username} is busy right now`, 'err'); goHome(); },
+      knocking: () => { /* waiting overlay already shown on Visit */ },
+      knock: () => { /* doorbell is delivered via the hub */ },
+      denied: () => { waitingOverlay(null); toast(`${this.view.owner.username} is not home right now`, 'err'); goHome(); },
     });
   }
   private addPeer(p: PeerState) {
     if (p.id === me().user.id || this.peers.has(p.id)) return;
     if (p.area === 'house') return; // missing area = treat as here until their first move
-    const pl = new Player(this, p.x || this.doorX, p.y || this.oy + (this.gr0 + 2.6) * T, p.character, p.name, false, PLAYER_SCALE);
+    const x = (p.x && p.x > 1) ? p.x : this.doorX;
+    const y = (p.y && p.y > 1) ? p.y : this.oy + (this.gr0 + 2.6) * T;
+    const pl = new Player(this, x, y, p.character, p.name, false, PLAYER_SCALE);
     pl.body!.enable = false;
-    (pl as any).target = { x: p.x || pl.x, y: p.y || pl.y };
+    (pl as any).target = { x, y };
     pl.setFacing(p.dir as Dir, p.moving);
     this.peers.set(p.id, pl);
   }

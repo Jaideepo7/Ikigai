@@ -1,13 +1,13 @@
 import Phaser from 'phaser';
 import { HouseScene } from './HouseScene';
 import { GardenScene } from './GardenScene';
-import { mountNavbar, tutorial, confirmDialog, isPomodoroActive, refreshFriendsIfOpen } from '../ui/panels';
-import { me, on, refreshMe, toast } from '../state';
+import { mountNavbar, tutorial, confirmDialog, isPomodoroActive, refreshFriendsIfOpen, knockPrompt } from '../ui/panels';
+import { me, on, refreshMe, toast, bus } from '../state';
 import { music, setSfx, unlock, setVolume, setTrack } from '../ui/audio';
 import { api } from '../api';
 import { FRAME, CHARACTERS } from './Player';
-import { connectHub } from './hub';
-import { detachDomain, domainOwnerId } from './domainNet';
+import { connectHub, hubVisit, type KnockEvent } from './hub';
+import { detachDomain, domainOwnerId, domainNet } from './domainNet';
 import { FENCE_COLORS, FURNITURE } from '../shared/rules';
 
 import { W, H } from './tiles';
@@ -57,6 +57,13 @@ export async function startGame() {
   window.addEventListener('pointerdown', kick); window.addEventListener('keydown', kick);
   connectHub();
   on('friends', refreshFriendsIfOpen);
+  bus.addEventListener('knock', ((ev: CustomEvent<KnockEvent>) => {
+    const { id, name, character } = ev.detail;
+    knockPrompt(name, character, (accept) => {
+      if (domainNet()) domainNet()!.visit(id, accept);
+      else hubVisit(id, accept);
+    });
+  }) as EventListener);
   if (game) return;
   game = new Phaser.Game({
     type: Phaser.AUTO, parent: 'game', width: W, height: H, pixelArt: true, backgroundColor: '#0b0f0a',

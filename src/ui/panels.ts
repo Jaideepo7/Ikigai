@@ -1,6 +1,7 @@
 import { api } from '../api';
 import { me, level, refreshMe, toast, on, store } from '../state';
 import { goto, activeScene } from '../game';
+import { detachDomain } from '../game/domainNet';
 import { sfx, music, setSfx, setVolume, setTrack, TRACKS } from './audio';
 import {
   DAILY_CAP, PLANTS, CARDS, plantById, plantSprite, plantStage, plantReward, growMs, previewReward, plotsUnlocked, STAGES, caseSlots, gardenTiles, MAX_LEVEL,
@@ -127,6 +128,13 @@ export function setHint(text: string | null) {
   let el = document.getElementById('hint');
   if (!text) { el?.remove(); return; }
   if (!el) { el = document.createElement('div'); el.id = 'hint'; overlay().appendChild(el); }
+  if (el.textContent !== text) el.textContent = text;
+}
+/** Compact top-left badge while visiting a friend (home or garden). */
+export function setVisitBadge(text: string | null) {
+  let el = document.getElementById('visit-badge');
+  if (!text) { el?.remove(); return; }
+  if (!el) { el = document.createElement('div'); el.id = 'visit-badge'; overlay().appendChild(el); }
   if (el.textContent !== text) el.textContent = text;
 }
 /** Modal yes/no. Resolves true on confirm. */
@@ -566,7 +574,7 @@ export async function friendsPanel(silent = false) {
   friendsLast = json;
   const row = (f: FriendRow) => `<div class="friend" data-id="${f.id}"><img src="/assets/chars/portrait_${f.character ?? 0}.png" alt="" /><span class="dot ${f.online ? 'on' : ''}"></span>
     <div class="grow"><b>${esc(f.username)}</b><br/><small>${f.status === 'accepted' ? (f.online ? 'in a garden now' : 'offline') : f.status === 'incoming' ? 'wants to be your friend' : 'request sent'}</small></div>
-    ${f.status === 'accepted' ? `<button class="btn sm sage" data-visit="${f.id}">Visit</button>` : f.status === 'incoming' ? `<button class="btn sm sage" data-accept="${f.id}">Accept</button>` : ''}<button class="btn sm rose" data-remove="${f.id}" title="${f.status === 'incoming' ? 'Decline' : 'Remove'}">✕</button></div>`;
+    ${f.status === 'accepted' ? `<button class="btn sm sage" data-visit="${f.id}" data-name="${esc(f.username)}">Visit</button>` : f.status === 'incoming' ? `<button class="btn sm sage" data-accept="${f.id}">Accept</button>` : ''}<button class="btn sm rose" data-remove="${f.id}" title="${f.status === 'incoming' ? 'Decline' : 'Remove'}">✕</button></div>`;
   const typed = (panelEl?.dataset.name === 'friends' && (panelEl.querySelector('#fcode') as HTMLInputElement | null)?.value) || '';
   const p = openPanel(`<h2>👥 Friends</h2><p class="sub">Share your code so friends can add you. Requests and accepts arrive instantly.</p>
     <div class="code-box"><span>Your code</span><span class="code">${data.code}</span><input id="fcode" maxlength="6" placeholder="FRIEND CODE" value="${esc(typed)}" /><button class="btn sm" id="fadd">Add</button></div>
@@ -576,24 +584,37 @@ export async function friendsPanel(silent = false) {
   p.querySelector('#fadd')!.addEventListener('click', async () => { try { await api.post('/api/friends/request', { code: (p.querySelector('#fcode') as HTMLInputElement).value }); toast('Request sent!'); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('[data-accept]').forEach((b) => b.addEventListener('click', async () => { try { await api.post('/api/friends/accept', { user_id: Number(b.dataset.accept) }); sfx.chime(); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
   p.querySelectorAll<HTMLElement>('[data-remove]').forEach((b) => b.addEventListener('click', async () => { try { await api.del(`/api/friends/${b.dataset.remove}`); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
-  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => { closePanel(); goto('House', { ownerId: Number(b.dataset.visit), spawn: 'hallway' }); }));
+  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => {
+    const ownerId = Number(b.dataset.visit);
+    const who = b.dataset.name || 'friend';
+    closePanel();
+    sfx.chime();
+    waitingOverlay(who, () => {
+      waitingOverlay(null);
+      detachDomain(ownerId);
+      goto('House', { spawn: 'hallway', ownerId: me().user.id });
+    });
+    goto('House', { ownerId, spawn: 'hallway' });
+  }));
 }
 /** Owner side: someone is knocking. Non-modal card in the top-right. */
 export function knockPrompt(nameText: string, character: number, answer: (accept: boolean) => void) {
   document.getElementById('knock')?.remove();
   const el = document.createElement('div'); el.id = 'knock';
-  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is at your door.<br/><small>Let them into your home?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
+  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is ringing your doorbell.<br/><small>Let them into your home?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
   overlay().appendChild(el); sfx.chime();
-  el.querySelector('#k-yes')!.addEventListener('click', () => { answer(true); el.remove(); });
-  el.querySelector('#k-no')!.addEventListener('click', () => { answer(false); el.remove(); });
-  setTimeout(() => { if (el.isConnected) { answer(false); el.remove(); } }, 45_000);
+  let done = false;
+  const finish = (v: boolean) => { if (done) return; done = true; el.remove(); answer(v); };
+  el.querySelector('#k-yes')!.addEventListener('click', () => finish(true));
+  el.querySelector('#k-no')!.addEventListener('click', () => finish(false));
+  setTimeout(() => { if (el.isConnected) finish(false); }, 45_000);
 }
 /** Visitor side: waiting for the owner. Pass null to hide. */
 export function waitingOverlay(owner: string | null, cancel?: () => void) {
   document.getElementById('waiting')?.remove();
   if (!owner) return;
   const el = document.createElement('div'); el.id = 'waiting';
-  el.innerHTML = `<div class="panel" style="width:420px;text-align:center"><h2>🚪 Knocking...</h2><p class="sub">Waiting for <b>${esc(owner)}</b> to let you in.</p><div class="dots-anim"><i></i><i></i><i></i></div><button class="btn rose sm" id="w-cancel">Go back home</button></div>`;
+  el.innerHTML = `<div class="panel" style="width:420px;text-align:center"><h2>🔔 Ringing doorbell...</h2><p class="sub">Waiting for <b>${esc(owner)}</b> to let you in.</p><div class="dots-anim"><i></i><i></i><i></i></div><button class="btn rose sm" id="w-cancel">Go back home</button></div>`;
   overlay().appendChild(el);
   el.querySelector('#w-cancel')!.addEventListener('click', () => { el.remove(); cancel?.(); });
 }
@@ -711,7 +732,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit knocks at their door — they let you into their home. Once inside you can walk between their house and garden freely, see each other in real time, and the left gateway takes you back to yours. Wave and chat with Enter.'],
+  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit rings their doorbell — wait for them to let you into their home. Once inside you can see each other, walk to their garden freely, and the left gateway takes you back to yours.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }
