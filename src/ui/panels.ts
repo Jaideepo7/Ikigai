@@ -480,7 +480,7 @@ export async function friendsPanel(silent = false) {
   p.querySelector('#fadd')!.addEventListener('click', async () => { try { await api.post('/api/friends/request', { code: (p.querySelector('#fcode') as HTMLInputElement).value }); toast('Request sent!'); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('[data-accept]').forEach((b) => b.addEventListener('click', async () => { try { await api.post('/api/friends/accept', { user_id: Number(b.dataset.accept) }); sfx.chime(); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
   p.querySelectorAll<HTMLElement>('[data-remove]').forEach((b) => b.addEventListener('click', async () => { try { await api.del(`/api/friends/${b.dataset.remove}`); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
-  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => { closePanel(); goto('Garden', { ownerId: Number(b.dataset.visit), spawn: 'left' }); }));
+  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => { closePanel(); goto('House', { ownerId: Number(b.dataset.visit), spawn: 'hallway' }); }));
 }
 /** Owner side: someone is knocking. Non-modal card in the top-right. */
 export function knockPrompt(nameText: string, character: number, answer: (accept: boolean) => void) {
@@ -615,7 +615,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the hallway on the right to add friends by code. Visit their garden from the left side, enter their home through the door, and take the left hollow hallway back to yours. Wave and chat with Enter. They decide whether to let you in.'],
+  ['Friends 👥', 'Walk through the hallway on the right to add friends by code. Visit drops you in their home by the left exit; the bottom door leads to their garden, and the left hallway takes you back to yours. Wave and chat with Enter in the garden. They decide whether to let you in.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }
