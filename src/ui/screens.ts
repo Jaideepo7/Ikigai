@@ -71,7 +71,7 @@ function wireSelect() {
     box.className = 'confirm';
     box.innerHTML = `<div class="confirm-card"><h2>Are you sure?</h2><p>You will not be able to go back!</p>
       <img src="/assets/chars/portrait_${i}.png" alt="" />
-      <div class="confirm-actions"><button class="btn" id="c-no">No, Take me back</button><button class="btn rose" id="c-yes">Yes I'm sure!</button></div></div>`;
+      <div class="confirm-actions"><button class="btn rose" id="c-no">No, Take me back</button><button class="btn sage" id="c-yes">Yes I'm sure!</button></div></div>`;
     document.body.appendChild(box);
     box.querySelector('#c-no')!.addEventListener('click', () => box.remove());
     box.querySelector('#c-yes')!.addEventListener('click', async () => {
