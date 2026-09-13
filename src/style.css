@@ -25,8 +25,8 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .btn { position: relative; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 10px 22px; border: 2px solid var(--cream); background: var(--forest); color: var(--cream); font-family: var(--font-pixel); font-size: 18px; font-weight: 600; box-shadow: 5px 5px 0 #000; transition: transform .06s, box-shadow .06s; text-decoration: none; }
 .btn:hover { transform: translate(2px, 2px); box-shadow: 3px 3px 0 #000; }
 .btn:active { transform: translate(5px, 5px); box-shadow: 0 0 0 #000; }
-.btn.rose { background: var(--rose); box-shadow: 5px 5px 0 var(--cream); }
-.btn.rose:hover { box-shadow: 3px 3px 0 var(--cream); }
+.btn.rose { background: #c23b2e; border-color: #fff; color: #fff; box-shadow: 5px 5px 0 #000; }
+.btn.rose:hover { box-shadow: 3px 3px 0 #000; }
 .btn.sage { background: var(--sage); color: var(--forest); border-color: var(--forest); }
 .btn.sm { padding: 6px 12px; font-size: 14px; box-shadow: 3px 3px 0 #000; }
 .btn.sm:hover { box-shadow: 2px 2px 0 #000; }
