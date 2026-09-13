@@ -109,6 +109,7 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .panel .sub { margin: 0 0 14px; color: #6b5a48; font-family: var(--font-pixel); font-size: 16px; }
 .panel .x { position: absolute; top: 12px; right: 12px; margin: 0; width: 38px; height: 38px; z-index: 2; background: var(--paper); border: 3px solid #8b5a2b; font-family: var(--font-pixel); font-size: 20px; font-weight: 700; box-shadow: 3px 3px 0 #000; }
 .panel-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; padding-right: 48px; }
+.panel-head-actions { display: flex; flex-wrap: wrap; gap: 8px; justify-content: flex-end; }
 .vine { position: absolute; width: 60px; pointer-events: none; }
 .vine.tl { left: -22px; top: -22px; } .vine.br { right: -22px; bottom: -22px; transform: rotate(180deg); }
 .card-row { display: flex; gap: 12px; flex-wrap: wrap; }
@@ -122,6 +123,11 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 
 /* tasks */
 .task-list { display: grid; gap: 10px; }
+.syllabus-drafts { display: grid; gap: 8px; margin: 10px 0 14px; max-height: 420px; overflow: auto; }
+.syllabus-draft { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; background: #fff9ea; border: 3px solid #d9c8a5; font-family: var(--font-pixel); cursor: pointer; }
+.syllabus-draft input { margin-top: 4px; flex: 0 0 auto; }
+.syllabus-draft b { display: block; font-size: 16px; }
+.syllabus-draft small { display: block; margin-top: 4px; color: #6b5a48; font-size: 13px; line-height: 1.35; }
 .task { display: grid; grid-template-columns: minmax(220px, 1fr) auto auto; gap: 14px; align-items: center; background: #fff9ea; border: 3px solid #d9c8a5; border-left-width: 8px; padding: 10px 14px; }
 .task.priority-1 { border-left-color: var(--sage); }
 .task.priority-2 { border-left-color: #d9a23c; }

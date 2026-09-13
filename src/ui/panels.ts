@@ -215,11 +215,12 @@ export function tasksPanel(folder: string | null = taskFolder, view: TaskView = 
   };
   const days = Array.from({ length: 7 }, (_, i) => addDays(today, i));
   const calendar = view === 'week' ? `<div class="week-grid">${days.map((d, i) => `<button data-day="${d}" class="${d === today ? 'today' : ''}"><b>${['Today', 'Tomorrow'][i] ?? new Date(d + 'T12:00:00').toLocaleDateString(undefined, { weekday: 'short' })}</b><span>${new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}</span><i>${all.filter((t) => t.due_date === d).length} task${all.filter((t) => t.due_date === d).length === 1 ? '' : 's'}</i></button>`).join('')}</div>` : '';
-  const p = openPanel(`<div class="panel-head"><div><h2>📖 My Tasks</h2><p class="sub">Plan today and view the next seven days.</p></div><button class="btn sm" id="new-task">+ New Task</button></div>${dailyBar()}
+  const p = openPanel(`<div class="panel-head"><div><h2>📖 My Tasks</h2><p class="sub">Plan today and view the next seven days.</p></div><div class="panel-head-actions"><button class="btn sm" id="import-syllabus">Import from syllabus</button><button class="btn sm sage" id="new-task">+ New Task</button></div></div>${dailyBar()}
     <div class="tabs task-toolbar"><div class="task-views"><button data-v="today" class="${view === 'today' ? 'on' : ''}">To-do Today</button><button data-v="week" class="${view === 'week' ? 'on' : ''}">Week</button><button data-v="all" class="${view === 'all' ? 'on' : ''}">All</button></div><div class="folders"><button data-f="" class="${folder === null ? 'on' : ''}">All folders (${inView.length})</button>${folders.map((f) => `<button data-f="${esc(f)}" class="${folder === f ? 'on' : ''}">📁 ${esc(f)} (${inView.filter((t) => t.folder === f).length})</button>`).join('')}<button id="add-folder">+ New folder</button></div></div>${calendar}
     <div class="task-list">${tasks.length ? tasks.map(row).join('') : '<div class="empty-state"><b>No tasks here.</b><span>Create a task when you are ready.</span></div>'}</div>`, 'wide');
   name('tasks');
   p.querySelector('#new-task')!.addEventListener('click', () => createTaskPanel(folder ?? ''));
+  p.querySelector('#import-syllabus')!.addEventListener('click', () => importSyllabusPanel(folder ?? ''));
   p.querySelectorAll<HTMLElement>('[data-v]').forEach((b) => b.addEventListener('click', () => tasksPanel(folder, b.dataset.v as TaskView)));
   p.querySelectorAll<HTMLElement>('.folders [data-f]').forEach((b) => b.addEventListener('click', () => tasksPanel(b.dataset.f || null, view)));
   p.querySelectorAll<HTMLElement>('[data-day]').forEach((b) => b.addEventListener('click', () => createTaskPanel(folder ?? '', b.dataset.day)));
@@ -297,6 +298,73 @@ export function createTaskPanel(folder = '', dueDate = localDay()) {
     } catch (ex) { err(ex); }
   });
   preview();
+}
+
+type DraftTask = { name: string; description: string; due_date: string | null; priority: number; difficulty: number; est_minutes: number };
+
+/** Upload a syllabus PDF → extract text → Gemini drafts tasks for one class folder. */
+export function importSyllabusPanel(folderHint = '') {
+  const p = openPanel(`<h2>📄 Import from syllabus</h2>
+    <p class="sub">Upload one class PDF. We pull the text, ask Gemini for a task list, then you pick what to add.</p>
+    <form class="form" id="syllabus-form">
+      <label>📁 Class name</label>
+      <input type="text" id="syl-class" maxlength="30" required placeholder="e.g. CS 225" value="${esc(folderHint)}" />
+      <label>📎 Syllabus PDF</label>
+      <input type="file" id="syl-file" accept="application/pdf,.pdf" required />
+      <p class="sub" id="syl-status"></p>
+      <div class="form-actions"><button class="btn sage" type="submit" id="syl-go">Scan syllabus</button><button class="btn rose" type="button" id="syl-cancel">Cancel</button></div>
+    </form>
+    <div id="syl-preview" hidden></div>`);
+  name('import-syllabus');
+  const status = p.querySelector('#syl-status')!;
+  const preview = p.querySelector<HTMLElement>('#syl-preview')!;
+  p.querySelector('#syl-cancel')!.addEventListener('click', () => tasksPanel(folderHint || null));
+  p.querySelector('#syllabus-form')!.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const className = (p.querySelector('#syl-class') as HTMLInputElement).value.trim().slice(0, 30);
+    const file = (p.querySelector('#syl-file') as HTMLInputElement).files?.[0];
+    if (!className) return toast('Enter a class name', 'err');
+    if (!file) return toast('Choose a PDF', 'err');
+    if (file.size > 8_000_000) return toast('PDF must be under 8 MB', 'err');
+    const go = p.querySelector<HTMLButtonElement>('#syl-go')!;
+    go.disabled = true;
+    preview.hidden = true;
+    preview.innerHTML = '';
+    try {
+      status.textContent = 'Extracting text from PDF…';
+      const { extractPdfText } = await import('../pdfText');
+      const text = await extractPdfText(file);
+      if (text.length < 40) throw new Error('Could not read text from that PDF. Try a text-based (not scanned) syllabus.');
+      status.textContent = 'Asking Gemini for tasks…';
+      const out = await api.post<{ class_name: string; tasks: DraftTask[] }>('/api/tasks/import-syllabus', { text, class_name: className });
+      status.textContent = `Found ${out.tasks.length} task${out.tasks.length === 1 ? '' : 's'} for ${out.class_name}.`;
+      renderSyllabusPreview(preview, out.class_name, out.tasks);
+      preview.hidden = false;
+    } catch (ex) { err(ex); status.textContent = ''; }
+    finally { go.disabled = false; }
+  });
+}
+
+function renderSyllabusPreview(box: Element, className: string, tasks: DraftTask[]) {
+  const pri = ['Low', 'Normal', 'High'];
+  box.innerHTML = `<h3 style="margin:18px 0 8px">Review tasks</h3>
+    <p class="sub">They will be saved in folder <b>${esc(className)}</b>. Uncheck anything you do not want.</p>
+    <div class="syllabus-drafts">${tasks.map((t, i) => `<label class="syllabus-draft">
+      <input type="checkbox" data-i="${i}" checked />
+      <div><b>${esc(t.name)}</b><small>${esc(t.description) || 'No details'} · 📅 ${t.due_date ? esc(t.due_date) : 'no date'} · ⏱ ${fmtMin(t.est_minutes)} · ${pri[t.priority - 1] ?? 'Normal'} · ${'⭐'.repeat(t.difficulty)}</small></div>
+    </label>`).join('')}</div>
+    <div class="form-actions"><button class="btn sage" type="button" id="syl-add">Add selected tasks</button><button class="btn" type="button" id="syl-back">Back to tasks</button></div>`;
+  box.querySelector('#syl-back')!.addEventListener('click', () => tasksPanel(className));
+  box.querySelector('#syl-add')!.addEventListener('click', async () => {
+    const selected = [...box.querySelectorAll<HTMLInputElement>('input[data-i]:checked')].map((el) => tasks[Number(el.dataset.i)]).filter(Boolean);
+    if (!selected.length) return toast('Select at least one task', 'err');
+    try {
+      const r = await api.post<{ count: number; folder: string }>('/api/tasks/bulk', { folder: className, tasks: selected });
+      await refreshMe(); sfx.plant();
+      toast(`Added ${r.count} task${r.count === 1 ? '' : 's'} to ${r.folder}`, 'reward');
+      tasksPanel(r.folder);
+    } catch (e) { err(e); }
+  });
 }
 
 // ---------- pomodoro ----------
