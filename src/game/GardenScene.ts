@@ -164,16 +164,20 @@ export class GardenScene extends Phaser.Scene {
     const rnd = new Phaser.Math.RandomDataGenerator([`decor-trees-${this.ownerId}`]);
     const gx = this.ox + this.gc0 * T, gy = this.oy + this.gr0 * T, size = this.n * T;
     const keys = ['decor_tree_emerald', 'decor_tree_lime'];
-    const placed: { x: number; y: number }[] = [];
+    const placed: { x: number; y: number; r: number }[] = [];
     const place = (x: number, y: number, height: number) => {
-      for (const p of placed) if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < 60) return false;
-      const tree = this.add.image(Math.round(x), Math.round(y), keys[rnd.between(0, 1)])
-        .setOrigin(0.5, 1).setName('garden-decor-tree');
-      tree.setScale(Math.min(height / tree.height, (MARGIN * T - 48) / tree.width));
+      const key = keys[rnd.between(0, 1)];
+      const src = this.textures.get(key).getSourceImage();
+      const scale = Math.min(height / src.height, (MARGIN * T - 48) / src.width);
+      // Bounding-circle radius so two canopies never overlap, whichever direction they're offset in.
+      const r = Math.max(src.width, src.height) * scale / 2;
+      for (const p of placed) if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < r + p.r) return false;
+      const tree = this.add.image(Math.round(x), Math.round(y), key).setOrigin(0.5, 1).setName('garden-decor-tree');
+      tree.setScale(scale);
       tree.setFlipX(rnd.frac() < 0.5).setDepth(tree.y);
       // Only the trunk blocks walking; the canopy sorts above players behind it.
       solidRect(this, this.walls, tree.x - 14, tree.y - 20, 28, 20);
-      placed.push({ x, y });
+      placed.push({ x, y, r });
       return true;
     };
     // Random count and scatter — left margin, right margin, or below the fence — never inside it.
