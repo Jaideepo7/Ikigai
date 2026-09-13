@@ -111,3 +111,5 @@ sets their XP to `xpForLevel(level)` — level is never special-cased, it always
 - A branch/tag name with an apostrophe (e.g. `Samartha's-changes`) breaks bash quoting; alias it to a local branch
   first. `HANDOFF.md` documents that one-time merge; don't let a contributor's personal D1 id / Worker name / repo
   URL leak into config when merging.
+- `tools/build_chars.py` and `tools/extract_assets.py` are the old v1/v2 asset pipelines, superseded by
+  `tools/build_v3_assets.py` and unreferenced elsewhere; don't run them expecting current output.

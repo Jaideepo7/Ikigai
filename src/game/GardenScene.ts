@@ -152,27 +152,27 @@ export class GardenScene extends Phaser.Scene {
     const rnd = new Phaser.Math.RandomDataGenerator([`decor-trees-${this.ownerId}`]);
     const gx = this.ox + this.gc0 * T, gy = this.oy + this.gr0 * T, size = this.n * T;
     const keys = ['decor_tree_emerald', 'decor_tree_lime'];
-    let variant = rnd.between(0, 1);
-    const addTree = (x: number, y: number, height: number) => {
-      const tree = this.add.image(Math.round(x), Math.round(y), keys[variant++ % keys.length])
+    const placed: { x: number; y: number }[] = [];
+    const place = (x: number, y: number, height: number) => {
+      for (const p of placed) if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < 60) return false;
+      const tree = this.add.image(Math.round(x), Math.round(y), keys[rnd.between(0, 1)])
         .setOrigin(0.5, 1).setName('garden-decor-tree');
       tree.setScale(Math.min(height / tree.height, (MARGIN * T - 48) / tree.width));
       tree.setFlipX(rnd.frac() < 0.5).setDepth(tree.y);
       // Only the trunk blocks walking; the canopy sorts above players behind it.
       solidRect(this, this.walls, tree.x - 14, tree.y - 20, 28, 20);
+      placed.push({ x, y });
+      return true;
     };
-    // Three loosely spaced trees on each side, with a clear strip beside the fences.
-    for (const side of [-1, 1]) {
-      for (let i = 0; i < 3; i++) {
-        const x = side < 0 ? gx - MARGIN * T / 2 - 8 : gx + size + MARGIN * T / 2 + 8;
-        const y = gy + ((i + rnd.realInRange(0.65, 0.85)) / 3) * size;
-        addTree(x + rnd.realInRange(-6, 6), y, rnd.between(180, 220));
-      }
-    }
-    // Two shorter trees at the far end; leave the middle approach open.
-    for (const fraction of [0.2, 0.8]) {
-      const height = rnd.between(144, 160);
-      addTree(gx + size * fraction + rnd.realInRange(-24, 24), gy + size + height + 16, height);
+    // Random count and scatter — left margin, right margin, or below the fence — never inside it.
+    const count = rnd.between(5, 10);
+    for (let i = 0; i < count; i++) {
+      const zone = rnd.frac();
+      let x: number, y: number, height: number;
+      if (zone < 0.42) { x = gx - rnd.realInRange(20, MARGIN * T - 20); y = gy + rnd.realInRange(0, size); height = rnd.between(150, 220); }
+      else if (zone < 0.84) { x = gx + size + rnd.realInRange(20, MARGIN * T - 20); y = gy + rnd.realInRange(0, size); height = rnd.between(150, 220); }
+      else { x = gx + rnd.realInRange(-20, size + 20); y = gy + size + rnd.realInRange(40, 150); height = rnd.between(140, 170); }
+      for (let attempt = 0; attempt < 15 && !place(x, y, height); attempt++) { x += rnd.realInRange(-30, 30); y += rnd.realInRange(-30, 30); }
     }
   }
 
