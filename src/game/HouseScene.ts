@@ -17,6 +17,7 @@ const ROOM_X0 = 233, ROOM_Y0 = 386, WORLD_W = 1536, WORLD_H = 1024;
 const FLOOR = { x0: 215, y0: 370, x1: 1340, y1: 850 };
 const DOOR = { x0: 700, x1: 870 };
 const FRIENDS_DOOR = { y0: 560, y1: 690 };
+const FURNITURE_SCALE = 2;
 type Spot = 'bed' | 'desk' | 'case';
 type Place = { furniture_id: number; placedId: number | null };
 
@@ -87,7 +88,7 @@ export class HouseScene extends Phaser.Scene {
     for (const p of me().placed) {
       const f = furnitureById(p.furniture_id); if (!f) continue;
       const { x, y } = this.tileToPx(p.cx, p.cy, f.w, f.h);
-      const im = this.add.image(x, y, `f_${f.id}`).setOrigin(0.5, 1).setDepth(f.kind === 'rug' ? -5 : y - (f.kind === 'walk' ? 20 : 0)).setName(`room-furniture-${p.id}`);
+      const im = this.add.image(x, y, `f_${f.id}`).setOrigin(0.5, 1).setScale(FURNITURE_SCALE).setDepth(f.kind === 'rug' ? -5 : y - (f.kind === 'walk' ? 20 : 0)).setName(`room-furniture-${p.id}`);
       im.setInteractive();
       im.on('pointerdown', (ptr: Phaser.Input.Pointer, _lx: number, _ly: number, ev: Phaser.Types.Input.EventData) => { if (this.editing && !this.placing && !isPanelOpen()) { ev.stopPropagation(); this.openMenu(p, ptr); } });
       this.furnitureSprites.push(im);
@@ -119,7 +120,7 @@ export class HouseScene extends Phaser.Scene {
     this.stopPlacing();
     const f = furnitureById(furniture_id); if (!f) return;
     this.placing = { furniture_id, placedId };
-    this.ghost = this.add.image(0, 0, `f_${f.id}`).setOrigin(0.5, 1).setAlpha(0.7).setDepth(5000).setVisible(false);
+    this.ghost = this.add.image(0, 0, `f_${f.id}`).setOrigin(0.5, 1).setScale(FURNITURE_SCALE).setAlpha(0.7).setDepth(5000).setVisible(false);
     this.grid.setVisible(true);
     setHint(`Placing ${f.name}: click a floor tile (one tile of space around furniture) · Esc to cancel`);
   }
