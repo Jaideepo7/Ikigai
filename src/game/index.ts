@@ -62,6 +62,15 @@ export async function startGame() {
     physics: { default: 'arcade', arcade: { debug: false } },
     scene: [Boot, HouseScene, GardenScene],
   });
+  // The toolbar can wrap independently of a window resize (for example on scene changes).
+  const navbar = document.getElementById('navbar')!;
+  const layoutObserver = new ResizeObserver(() => {
+    document.documentElement.style.setProperty('--nav-height', `${navbar.getBoundingClientRect().height}px`);
+    game?.scale.refresh();
+  });
+  layoutObserver.observe(navbar);
+  layoutObserver.observe(document.getElementById('game')!);
+  game.events.once(Phaser.Core.Events.DESTROY, () => layoutObserver.disconnect());
   (window as any).__game = game; (window as any).__refresh = refreshMe; // debugging hooks for the e2e scripts
   setInterval(() => refreshMe().catch(() => {}), 60_000);
   on('me', () => { const s = game?.scene.getScenes(true)[0] as any; s?.onMe?.(); });
