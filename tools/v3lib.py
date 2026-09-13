@@ -6,8 +6,11 @@ from scipy import ndimage
 
 def key_bg(im, light=195, neutral=18, fringe=1):
     """Remove a checkerboard / white background: neutral light pixels that connect to the image border become
-    transparent (interior light pixels enclosed by outlines survive). `fringe` px of anti-aliased edge is trimmed."""
-    rgb = np.array(im.convert('RGB')).astype(int)
+    transparent (interior light pixels enclosed by outlines survive). `fringe` px of anti-aliased edge is trimmed.
+    Existing alpha is preserved — never force opaque — so sheets that are already keyed keep soft edges."""
+    rgba = np.array(im.convert('RGBA'))
+    rgb = rgba[:, :, :3].astype(int)
+    alpha = rgba[:, :, 3].copy()
     mx, mn = rgb.max(axis=2), rgb.min(axis=2)
     bg = (mx - mn < neutral) & (mn > light)
     lab, _ = ndimage.label(bg)
@@ -15,7 +18,8 @@ def key_bg(im, light=195, neutral=18, fringe=1):
     mask = np.isin(lab, border[border > 0])
     if fringe:
         mask = ndimage.binary_dilation(mask, iterations=fringe)
-    out = np.dstack([rgb.astype(np.uint8), np.where(mask, 0, 255).astype(np.uint8)])
+    alpha[mask] = 0
+    out = np.dstack([rgb.astype(np.uint8), alpha])
     return Image.fromarray(out, 'RGBA')
 
 

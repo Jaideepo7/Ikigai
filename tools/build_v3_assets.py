@@ -80,11 +80,16 @@ print('chars ok')
 def cells(im, cols, rows):
     cw, ch = im.width / cols, im.height / rows
     return [im.crop((int(c * cw), int(r * ch), int((c + 1) * cw), int((r + 1) * ch))) for r in range(rows) for c in range(cols)]
+# Flower.png is already alpha-keyed; preserve soft edges (key_bg must not flatten alpha to opaque).
 flowers = cells(key_bg(Image.open(D + 'Flower.png'), light=246, neutral=9, fringe=0), 5, 4)
 for k, im in enumerate(flowers): tight(im).save(OUT + f'plants/flower_{k + 1}.png')
-trees = cells(key_bg(Image.open(D + 'Trees.png'), light=225, neutral=30), 6, 2)
-for k, im in enumerate(trees): tight(im).save(OUT + f'plants/tree_{k + 21}.png')
-tight(key_bg(Image.open(D + 'Twig.png'), light=225, neutral=30)).save(OUT + 'plants/twig.png')
+if os.path.exists(D + 'Trees.png'):
+    trees = cells(key_bg(Image.open(D + 'Trees.png'), light=225, neutral=30), 6, 2)
+    for k, im in enumerate(trees): tight(im).save(OUT + f'plants/tree_{k + 21}.png')
+else:
+    print('Trees.png missing — keeping existing tree_*.png')
+if os.path.exists(D + 'Twig.png'):
+    tight(key_bg(Image.open(D + 'Twig.png'), light=225, neutral=30)).save(OUT + 'plants/twig.png')
 for f in glob.glob(OUT + 'plants/plant_*.png'): os.remove(f)
 print('plants ok')
 
