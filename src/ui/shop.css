@@ -1,6 +1,6 @@
 /* Shop uses the same parchment, tabs and pixel buttons as the other menus. */
-.panel.shop-panel.shop-panel { width: min(1120px, calc(100vw - 32px)); padding: 24px; }
-.shop-panel .shop-shell { padding: 4px 12px 8px 0; overflow-y: auto; overflow-x: hidden; }
+.panel.shop-panel.shop-panel { width: min(1120px, calc(100vw - 32px)); padding: 24px; display: flex; flex-direction: column; }
+.shop-panel .shop-shell { width: 100%; min-height: 0; max-height: none; padding: 4px 12px 8px 0; overflow-y: auto; overflow-x: hidden; scrollbar-gutter: stable; }
 .market-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-right: 38px; }
 .market-head h2 { margin: 0 0 4px; font-size: 32px; }
 .market-head p, .market-section-head p { margin: 0; color: #776145; font-size: 16px; }
@@ -22,6 +22,7 @@
 .market-product > .btn { margin-top: auto; }
 .market-season .season-art { font-size: 42px; display: block; }
 .market-season p { margin: 0; font-size: 15px; }
+.market-season > .owned-label { margin-top: auto; }
 .market-extras { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 24px; padding-top: 20px; border-top: 2px solid #c6b088; align-items: start; }
 .market-feature { min-width: 0; }
 .market-card { display: flex; align-items: center; gap: 18px; }
@@ -45,6 +46,10 @@
  .market-section-head { flex-wrap: wrap; }
 }
 @media (max-width: 520px) {
+ .panel.shop-panel.shop-panel { padding: 16px 12px; }
+ .market-head { padding-right: 36px; }
+ .market-wallet { gap: 8px; font-size: 16px; }
+ .market-wallet > .btn { flex-basis: 100%; }
  .market-extras { grid-template-columns: 1fr; }
  .market-head h2 { font-size: 26px; }
  .market-nav .tabs button { font-size: 15px; padding: 8px 10px; }

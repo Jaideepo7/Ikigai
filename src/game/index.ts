@@ -6,9 +6,11 @@ import { me, on, refreshMe, toast, bus } from '../state';
 import { music, setSfx, unlock, setVolume, setTrack } from '../ui/audio';
 import { api } from '../api';
 import { FRAME, CHARACTERS } from './Player';
+import { hasDetailedWalk } from '../shared/movement';
 import { connectHub, hubVisit, type KnockEvent } from './hub';
 import { detachDomain, domainOwnerId, domainNet } from './domainNet';
 import { FENCE_COLORS, FURNITURE } from '../shared/rules';
+import { revealCamera } from './cam';
 
 import { W, H } from './tiles';
 export { W, H };
@@ -21,7 +23,7 @@ class Boot extends Phaser.Scene {
   preload() {
     this.load.spritesheet('tinytown', '/assets/tiles/tinytown.png', { frameWidth: 16, frameHeight: 16 });
     this.load.image('tinytown_img', '/assets/tiles/tinytown.png');
-    for (let i = 0; i < CHARACTERS; i++) this.load.spritesheet(`char_${i}`, `/assets/chars/char_${i}.png?v=160x140`, { frameWidth: FRAME.w, frameHeight: FRAME.h });
+    for (let i = 0; i < CHARACTERS; i++) this.load.spritesheet(`char_${i}`, `/assets/chars/char_${i}.png?v=${hasDetailedWalk(i) ? 'walk-cycle-1' : '160x140'}`, { frameWidth: FRAME.w, frameHeight: FRAME.h });
     for (let i = 1; i <= 20; i++) this.load.image(`flower_${i}`, `/assets/plants/flower_${i}.png`);
     this.load.image('twig', '/assets/plants/twig.png');
     for (const p of FENCE_PIECES) for (const c of FENCE_COLORS) this.load.image(`fence_${p}_${c}`, `/assets/fence/${p}_${c}.png`);
@@ -39,12 +41,13 @@ class Boot extends Phaser.Scene {
   create() {
     for (let i = 0; i < CHARACTERS; i++) {
       const f = (a: number, b: number) => this.anims.generateFrameNumbers(`char_${i}`, { start: a, end: b });
+      const detailed = hasDetailedWalk(i);
       this.anims.create({ key: `idle_down_${i}`, frames: f(0, 1), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_down_${i}`, frames: f(2, 3), frameRate: 6, repeat: -1 });
+      this.anims.create({ key: `walk_down_${i}`, frames: detailed ? f(12, 15) : f(2, 3), frameRate: detailed ? 8 : 6, repeat: -1 });
       this.anims.create({ key: `idle_up_${i}`, frames: f(4, 5), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_up_${i}`, frames: f(6, 7), frameRate: 6, repeat: -1 });
+      this.anims.create({ key: `walk_up_${i}`, frames: detailed ? f(16, 19) : f(6, 7), frameRate: detailed ? 8 : 6, repeat: -1 });
       this.anims.create({ key: `idle_side_${i}`, frames: f(8, 9), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_side_${i}`, frames: f(10, 11), frameRate: 6, repeat: -1 });
+      this.anims.create({ key: `walk_side_${i}`, frames: detailed ? f(20, 23) : f(10, 11), frameRate: detailed ? 8 : 6, repeat: -1 });
     }
     this.scene.start('House', { spawn: 'center', ownerId: me().user.id });
   }
@@ -104,6 +107,17 @@ export async function goto(scene: 'House' | 'Garden', data: Record<string, unkno
   const destOwner = typeof data.ownerId === 'number' ? data.ownerId : me().user.id;
   const cur = domainOwnerId();
   if (cur != null && cur !== destOwner) detachDomain(cur);
+  // Prefetch visit payloads before swapping scenes so the next create never awaits on a blank canvas.
+  if (destOwner !== me().user.id) {
+    try {
+      if (scene === 'Garden' && !data.gardenView) data = { ...data, gardenView: await api.get(`/api/garden/${destOwner}`) };
+      if (scene === 'House' && !data.houseView) data = { ...data, houseView: await api.get(`/api/house/${destOwner}`) };
+    } catch (e) {
+      toast((e as Error).message, 'err');
+      return;
+    }
+  }
+  revealCamera(active);
   active.scene.start(scene, data);
 }
 export function activeScene() { return game?.scene.getScenes(true)[0] as (Phaser.Scene & { startPlacing?: (id: number) => void }) | undefined; }

@@ -20,13 +20,14 @@ try {
  await page.goto('http://127.0.0.1:5173');
  await page.waitForFunction(() => window.__game?.scene.getScene('House')?.player?.body);
  await open('indoor');
- for (const [width, height] of [[1024, 600], [1366, 768], [1920, 1080], [900, 700], [600, 700]]) {
+ for (const [width, height] of [[1024, 600], [1366, 768], [1920, 1080], [900, 700], [600, 700], [390, 844], [320, 568]]) {
   await page.setViewportSize({ width, height });
   for (const tab of ['shop', 'indoor', 'outdoor', 'seasons']) {
    await open(tab); await page.evaluate(() => document.fonts.ready);
    const check = await page.evaluate(() => {
     const p = document.querySelector('.shop-panel'), shell = document.querySelector('.shop-shell'); const r = p.getBoundingClientRect();
     const fit = (a,b) => b.left >= a.left - 1 && b.right <= a.right + 1 && b.top >= a.top - 1 && b.bottom <= a.bottom + 1;
+    if (!fit(r, shell.getBoundingClientRect())) throw new Error('Shop scroll area is clipped by the panel');
     return { screen: r.left >= 0 && r.right <= innerWidth + 1 && r.top >= 0 && r.bottom <= innerHeight + 1, overflow: shell.scrollWidth <= shell.clientWidth + 1, art: [...document.querySelectorAll('.market-art img')].every(el => fit(el.parentElement.getBoundingClientRect(),el.getBoundingClientRect())), spin: fit(document.querySelector('.spin-box').getBoundingClientRect(),document.querySelector('.machine').getBoundingClientRect()) };
    });
    assert.deepEqual(check, { screen: true, overflow: true, art: true, spin: true }, `${tab} ${width}x${height}`);
@@ -56,5 +57,5 @@ try {
  await page.waitForFunction(() => window.__game.scene.getScene('House')?.player?.active);
  assert.equal(await page.evaluate(() => window.__game.scene.getScene('House').children.list.filter(x => x.name === 'room-furniture-20').length), 0);
  assert.deepEqual(errors, []);
- console.log('PASS: four shop tabs at five sizes, live countdown and automatic stock replacement, close during refresh, outdoor inventory and placement, no indoor duplication.');
+ console.log('PASS: four shop tabs at seven sizes, live countdown and automatic stock replacement, close during refresh, outdoor inventory and placement, no indoor duplication.');
 } finally { await browser.close(); }

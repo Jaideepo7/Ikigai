@@ -1,0 +1,80 @@
+/* Shared season cards for the shop and inventory. */
+.panel .season-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 16px;
+  padding: 4px 4px 6px 0;
+}
+.panel .season-card,
+.panel .market-season {
+  appearance: none;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  min-height: 228px;
+  padding: 18px 14px;
+  border: 3px solid #b39871;
+  border-radius: 0;
+  background: var(--paper2);
+  box-shadow: inset 0 0 0 2px #fff9ea, 3px 3px 0 #b9a789;
+  color: var(--ink);
+  font-family: var(--font-pixel);
+  text-align: center;
+}
+.panel .season-card > .season-art,
+.panel .market-season > .season-art {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  flex-shrink: 0;
+  font-size: 38px;
+  line-height: 1;
+  background: #fff9ea;
+  border: 2px solid #c6b088;
+}
+.panel .season-art.summer { background: #faeab0; }
+.panel .season-art.rainy { background: #dce8ef; }
+.panel .season-art.fall { background: #f3d6b8; }
+.panel .season-art.winter { background: #e5eeee; }
+.panel .season-card > b,
+.panel .market-season > b { min-height: 0; font-size: 21px; line-height: 1.2; }
+.panel .season-card > small,
+.panel .market-season > p {
+  margin: 0 0 4px;
+  color: #6b5a48;
+  font-family: var(--font-body);
+  font-size: 14px;
+  line-height: 1.45;
+}
+.panel .season-card > em,
+.panel .market-season > .owned-label {
+  margin-top: auto;
+  padding: 6px 12px;
+  border: 2px solid #4f7a52;
+  background: #dbe9c9;
+  color: #234831;
+  font-size: 15px;
+  font-style: normal;
+}
+.panel .market-season > .btn { min-height: 38px; min-width: 78px; margin-top: auto; }
+.panel .season-card:hover { border-color: #4f7a52; background: #e5e4c4; }
+.panel .season-card:focus-visible,
+.panel .market-season > .btn:focus-visible { outline: 3px solid #234831; outline-offset: 4px; }
+.panel .season-card:active { transform: translate(1px, 1px); }
+.panel .season-card.on {
+  border-color: #365b43;
+  background: #dbe9c9;
+  box-shadow: inset 0 0 0 2px #f1f5df, 3px 3px 0 #657d57;
+}
+.panel .season-card.on > em { background: #234831; color: #fff9ea; }
+.panel .section-copy h3 { margin: 12px 0 6px; font-size: 24px; }
+.panel .section-copy p { margin: 0 0 16px; color: #6b5a48; }
+.panel .season-now { margin: 16px 0 0; color: #6b5a48; font-size: 15px; }
+@media (max-width: 520px) {
+  .panel .season-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+  .panel .season-card, .panel .market-season { padding: 14px 8px; }
+  .panel .season-card > em { padding: 6px 8px; }
+}

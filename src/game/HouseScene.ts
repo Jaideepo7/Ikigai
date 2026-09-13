@@ -4,11 +4,12 @@ import { me } from '../state';
 import { api } from '../api';
 import { refreshMe, toast } from '../state';
 import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, setVisitBadge, houseHud, hideHouseHud, furnitureMenu, setNavMode, waitingOverlay } from '../ui/panels';
-import { ROOM, furnitureById, furnitureArea, furnitureFits, type PlacedFurniture, type HouseView } from '../shared/rules';
+import { ROOM, furnitureById, furnitureArea, furnitureFits, type PlacedFurniture, type HouseView, type GardenView } from '../shared/rules';
 import { T, solidRect } from './tiles';
 import { goto, POMODORO_LOCK_MSG } from './index';
 import { Net, type PeerState } from './net';
 import { attachDomain, detachDomain, domainPeer } from './domainNet';
+import { revealCamera, goScene, ensureCameraClear } from './cam';
 
 /**
  * The player's home (or a friend's), drawn on the room template (1536 x 1024). Furniture lives on a 17 x 7 tile grid.
@@ -44,23 +45,26 @@ export class HouseScene extends Phaser.Scene {
   private net?: Net;
   private peers = new Map<number, Player>();
   private chatEl?: HTMLDivElement;
+  private createGen = 0;
+  /** Ignore door/hallway exits until this time (ms) so spawn + held keys don't instantly re-trigger. */
+  private enterLockUntil = 0;
   constructor() { super('House'); }
 
-  async create(data: { spawn?: HouseSpawn; ownerId?: number } = {}) {
+  async create(data: { spawn?: HouseSpawn; ownerId?: number; houseView?: HouseView } = {}) {
+    const gen = ++this.createGen;
     this.teardown();
     this.ready = false; this.exiting = false; this.placing = null; this.editing = false;
     this.furnitureSprites = []; this.furnitureBodies = []; this.spots = []; this.visitPlaced = null; this.visitName = '';
     this.ownerId = data.ownerId ?? me().user.id;
-    // Clear any leftover fade from the previous scene so transitions never stick on a black screen.
-    this.cameras.main.resetFX();
-    this.cameras.main.setAlpha(1);
-    this.cameras.main.fadeIn(200, 11, 15, 10);
+    this.enterLockUntil = this.time.now + 900;
+    revealCamera(this);
     const own = this.ownerId === me().user.id;
     let ownerName = me().user.username;
 
     if (!own) {
-      const view = await api.get<HouseView>(`/api/house/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
-      if (!view) { detachDomain(this.ownerId); this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); return; }
+      const view = data.houseView ?? await api.get<HouseView>(`/api/house/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
+      if (gen !== this.createGen) return;
+      if (!view) { detachDomain(this.ownerId); goScene(this, 'House', { spawn: 'hallway', ownerId: me().user.id }); return; }
       this.visitPlaced = view.placed;
       this.visitName = view.owner.username;
       ownerName = view.owner.username;
@@ -124,7 +128,12 @@ export class HouseScene extends Phaser.Scene {
     this.events.once('shutdown', () => this.teardown());
     if (own) setHint('WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · Enter chat · F wave');
     else setHint(null);
+    this.player.setVelocity(0, 0);
+    this.player.setFacing(this.player.dir, false);
+    revealCamera(this);
     this.ready = true;
+    this.net?.resetMoveThrottle();
+    this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'house');
   }
 
   // ---------- realtime (shared with garden for this owner) ----------
@@ -135,11 +144,12 @@ export class HouseScene extends Phaser.Scene {
       waitingOverlay(null);
       setVisitBadge(null);
       detachDomain(this.ownerId);
-      this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id });
+      goScene(this, 'House', { spawn: 'hallway', ownerId: me().user.id });
     };
     this.net = attachDomain(this.ownerId, 'house', {
       roster: (_you, peers) => {
         waitingOverlay(null);
+        revealCamera(this);
         this.peers.forEach((p) => p.destroy()); this.peers.clear();
         peers.forEach((p) => this.addPeer(p));
         this.net?.resetMoveThrottle();
@@ -331,9 +341,11 @@ export class HouseScene extends Phaser.Scene {
 
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting) return;
+    ensureCameraClear(this);
     const own = this.ownerId === me().user.id;
     const waiting = !!document.getElementById('waiting');
-    const [vx, vy, run] = waiting || isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
+    const locked = this.time.now < this.enterLockUntil;
+    const [vx, vy, run] = waiting || locked || isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     // Tall furniture can legitimately sort in front of someone walking behind it.
     // Fade only the overlapping piece so the player stays visible while navigating.
@@ -347,33 +359,34 @@ export class HouseScene extends Phaser.Scene {
     for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
     const s = this.spotAt();
     if (own && !this.placing && !this.editing) setHint(isPanelOpen() ? null : s === 'bed' ? 'E: sleep and see your day' : s === 'desk' ? 'E: open your task book' : s === 'case' ? 'E: open the card case' : null);
-    if (waiting) return; // still knocking — stay put until accepted / cancelled
+    if (waiting || locked) return;
     const { x, y } = this.player;
-    if (y > FLOOR.y1 + 40 && x > DOOR.x0 && x < DOOR.x1) { this.exiting = true; this.leaveToGarden(); }
+    if (y > FLOOR.y1 + 40 && x > DOOR.x0 && x < DOOR.x1) { this.exiting = true; void this.leaveToGarden(); }
     else if (own && x > FLOOR.x1 - 10 && y > HALL.y0 && y < HALL.y1 + 20) { this.player.x = FLOOR.x1 - 50; this.player.setFacing('left', false); friendsPanel(); }
     else if (!own && x < FLOOR.x0 + 10 && y > HALL.y0 && y < HALL.y1 + 20) { this.exiting = true; this.leaveToOwnHome(); }
   }
   private leaveToOwnHome() {
+    this.player.setVelocity(0, 0);
+    this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'house');
     detachDomain(this.ownerId);
     setVisitBadge(null);
-    this.fadeTo(() => this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }));
+    goScene(this, 'House', { spawn: 'hallway', ownerId: me().user.id });
   }
   private async leaveToGarden() {
-    const data = { ownerId: this.ownerId, spawn: 'porch' as const };
+    const data: { ownerId: number; spawn: 'porch'; gardenView?: GardenView } = { ownerId: this.ownerId, spawn: 'porch' };
     const stepBack = () => { this.player.setVelocity(0, 0); this.player.y = FLOOR.y1 - 30; this.player.setFacing('up', false); this.exiting = false; };
     if (this.ownerId === me().user.id) {
       if (isPomodoroActive()) { toast(POMODORO_LOCK_MSG, 'err'); stepBack(); return; }
-      if (me().user.frozen) { stepBack(); await goto('Garden', data); return; }   // goto() shows the unfreeze dialog
+      if (me().user.frozen) { stepBack(); await goto('Garden', data); return; }
     }
-    this.fadeTo(() => this.scene.start('Garden', data));
-  }
-  /** Fade out then run next scene; always recover if the fade callback is missed. */
-  private fadeTo(next: () => void) {
-    const cam = this.cameras.main;
-    let done = false;
-    const go = () => { if (done) return; done = true; next(); };
-    cam.once('camerafadeoutcomplete', go);
-    cam.fadeOut(250, 11, 15, 10);
-    this.time.delayedCall(700, go);
+    this.player.setVelocity(0, 0);
+    this.net?.move(this.player.x, this.player.y, this.player.dir, false, 'house');
+    // Prefetch friend gardens before switching so we never sit on an empty black scene mid-await.
+    if (this.ownerId !== me().user.id) {
+      const view = await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null; });
+      if (!view) { stepBack(); return; }
+      data.gardenView = view;
+    }
+    goScene(this, 'Garden', data);
   }
 }

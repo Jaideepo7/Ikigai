@@ -1,15 +1,15 @@
 import Phaser from 'phaser';
 import { sfx } from '../ui/audio';
 
-export type Dir = 'up' | 'down' | 'left' | 'right';
+import { movementDirection, movementView, type Dir } from '../shared/movement';
+export type { Dir } from '../shared/movement';
 export const WALK = 230, RUN = 380;
 export const FRAME = { w: 160, h: 140 };
 export const CHARACTERS = 20;
 
 /**
- * A gardener sprite. Sheets are the untouched team art: front, side (facing right) and the four back-walk frames.
- * Idle = frame + a 1px breath; walking = the frame stepping up 2px (back uses two real walk frames).
- * Diagonal input shows the side view. All animation is frame based so physics owns x/y and pixels stay crisp.
+ * Eight-direction movement with normalized speed and frame-based animation.
+ * Physics owns x/y; turning and changing pace preserve the walking cycle.
  */
 export class Player extends Phaser.Physics.Arcade.Sprite {
   dir: Dir = 'down';
@@ -37,17 +37,23 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     const speed = run ? RUN : WALK;
     if (vx || vy) this.body!.velocity.normalize().scale(speed);
     const moving = !!(vx || vy);
-    if (moving) this.dir = vx ? (vx < 0 ? 'left' : 'right') : vy < 0 ? 'up' : 'down';
-    this.setFacing(this.dir, moving, run);
+    this.setFacing(movementDirection(vx, vy, this.dir), moving, moving && run);
     if (moving && this.isLocal) { this.stepTimer += dt; if (this.stepTimer > (run ? 180 : 280)) { this.stepTimer = 0; sfx.step(); } }
+    if (!moving) this.stepTimer = 0;
   }
   setFacing(dir: Dir, moving: boolean, running = false) {
     if (dir === this.dir && moving === this.moving && running === this.running) return;
+    const wasMoving = this.moving;
+    const frameIndex = (this.anims.currentFrame?.index ?? 1) - 1;
     this.dir = dir; this.moving = moving; this.running = running;
-    this.setFlipX(dir === 'left');
-    const view = dir === 'left' || dir === 'right' ? 'side' : dir;
+    this.setFlipX(dir.endsWith('left'));
+    const view = movementView(dir);
     const key = `${moving ? 'walk' : 'idle'}_${view}_${this.character}`;
-    this.play({ key, frameRate: moving ? (running ? 10 : 6) : 2 }, true);
+    if (this.anims.currentAnim?.key !== key) {
+      const frames = this.scene.anims.get(key).frames.length;
+      this.play({ key, startFrame: wasMoving && moving ? frameIndex % frames : 0 });
+    }
+    this.anims.timeScale = moving && running ? RUN / WALK : 1;
   }
   preUpdate(t: number, dt: number) {
     super.preUpdate(t, dt);

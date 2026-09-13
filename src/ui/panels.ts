@@ -1,4 +1,5 @@
 import './shop.css';
+import './seasons.css';
 import { api } from '../api';
 import { me, level, refreshMe, toast, on, store } from '../state';
 import { goto, activeScene } from '../game';
