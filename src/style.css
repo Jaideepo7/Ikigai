@@ -418,15 +418,15 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .card-offer { display: grid; grid-template-columns: 150px 1fr; gap: 16px; align-items: center; }
 .card-offer p { margin: 4px 0 10px; font-size: 14px; color: #6b5a48; }
 .empty-state.small { min-height: 80px; padding: 12px; }
-.spin-box { align-self: start; }
-.machine.v3 { display: block; position: relative; padding: 0; background: transparent; border: 0; box-shadow: none; aspect-ratio: 1119 / 563; }
+.spin-box { align-self: start; min-width: 0; }
+.machine.v3 { display: block; position: relative; width: 100%; max-width: 420px; min-width: 0; margin-inline: auto; container-type: inline-size; padding: 0; background: transparent; border: 0; box-shadow: none; aspect-ratio: 1119 / 563; }
 .machine.v3 .mach { position: absolute; inset: 0; width: 100%; height: 100%; image-rendering: pixelated; }
-.machine.v3 .reels { position: absolute; left: 24.9%; top: 38.4%; width: 52.5%; height: 23.8%; display: grid; grid-template-columns: repeat(3, 1fr); gap: 13.3%; margin: 0; align-items: center; }
-.machine.v3 .reel { width: auto; height: 100%; background: transparent; border: 0; box-shadow: none; border-radius: 0; font-size: clamp(18px, 5.5vw, 34px); display: grid; place-items: center; line-height: 1; padding: 0; }
+.machine.v3 .reels { position: absolute; left: 24.9%; top: 38.4%; width: 52.5%; height: 23.8%; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13.3%; margin: 0; align-items: center; }
+.machine.v3 .reel { width: auto; height: 100%; min-width: 0; min-height: 0; background: transparent; border: 0; box-shadow: none; border-radius: 0; font-size: 7cqw; display: grid; place-items: center; line-height: 1; padding: 0; }
 .machine.v3 .reel .ico.lg { width: 58%; height: auto; max-height: 78%; object-fit: contain; display: block; }
-.machine.v3 .spin-btn { position: absolute; left: 30%; top: 74%; width: 35%; height: 20.5%; background: transparent; border: 0; color: #fff9ea; font-family: var(--font-pixel); font-size: clamp(14px, 2.4vw, 20px); font-weight: 700; line-height: 1; padding: 0; display: grid; place-items: center; text-shadow: 1px 1px 0 #1d3a12; }
+.machine.v3 .spin-btn { position: absolute; left: 34.5%; top: 74.5%; width: 32%; height: 11.5%; background: transparent; border: 0; color: #fff9ea; font-family: var(--font-pixel); font-size: 4.6cqw; font-weight: 700; line-height: 1; padding: 0; white-space: nowrap; display: grid; place-items: center; text-shadow: 1px 1px 0 #1d3a12; }
 .machine.v3 .spin-btn:hover:not(:disabled) { color: #fff; transform: translateY(1px); }
-.machine.v3 .spin-btn:disabled { color: #cdd9b8; font-size: clamp(9px, 1.5vw, 12px); cursor: not-allowed; }
+.machine.v3 .spin-btn:disabled { color: #cdd9b8; font-size: 2.9cqw; cursor: not-allowed; }
 .machine.v3 .lever3 { position: absolute; left: 82%; top: 4%; width: 15%; height: 60%; background: transparent; border: 0; cursor: pointer; transition: transform .25s; transform-origin: 50% 90%; }
 .machine.v3 .lever3:hover:not(:disabled) { transform: rotate(6deg); }
 .machine.v3 .lever3.pulled { transform: rotate(38deg); }
