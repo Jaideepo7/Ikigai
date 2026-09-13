@@ -6,7 +6,7 @@ import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
 import { furnitureMenu, isPanelOpen, isPomodoroActive, plotDialog, setHint, setVisitBadge, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
 import { furnitureById, furnitureArea, gardenFurnitureFits, type PlacedFurniture, gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
-import { T, W, H, TT, layerFrom, solidRect } from './tiles';
+import { T, W, H, TT, SCALE, layerFrom, solidRect } from './tiles';
 
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
@@ -244,9 +244,15 @@ export class GardenScene extends Phaser.Scene {
     const now = Date.now();
     for (const p of this.view.plots) {
       const { x, y } = this.tilePx(p.tx, p.ty);
-      this.plotLayer.add(this.add.image(x, y, 'soil').setOrigin(0).setDepth(-5));
+      const stage = p.plant_id ? plantStage(p, now) : -1;
+      // Mature plants blend into the lawn: grass underfoot instead of bare soil.
+      if (p.plant_id && stage >= STAGES) {
+        this.plotLayer.add(this.add.image(x, y, 'tinytown', TT.grass[p.id % TT.grass.length]).setOrigin(0).setScale(SCALE).setDepth(-5));
+      } else {
+        this.plotLayer.add(this.add.image(x, y, 'soil').setOrigin(0).setDepth(-5));
+      }
       if (!p.plant_id) continue;
-      const plant = plantById(p.plant_id)!, stage = plantStage(p, now);
+      const plant = plantById(p.plant_id)!;
       if (stage === 0) continue; // seed: bare soil for the first seconds
       const cx = x + T / 2, by = y + T * 0.72;   // the stem grows out of the middle of the soil
       const key = stage === 1 ? 'twig' : plantSprite(plant);

@@ -313,7 +313,11 @@ export function importSyllabusPanel(folderHint = '') {
       <label>📁 Class name</label>
       <input type="text" id="syl-class" maxlength="30" required placeholder="e.g. CS 225" value="${esc(folderHint)}" />
       <label>📎 Syllabus PDF</label>
-      <input type="file" id="syl-file" accept="application/pdf,.pdf" required />
+      <div class="file-pick">
+        <input type="file" id="syl-file" class="native-file" accept="application/pdf,.pdf" required />
+        <button type="button" class="btn sm" id="syl-browse">Choose PDF</button>
+        <span class="file-pick-name" id="syl-name">No file chosen</span>
+      </div>
       <p class="sub" id="syl-status"></p>
       <div class="form-actions"><button class="btn sage" type="submit" id="syl-go">Scan syllabus</button><button class="btn rose" type="button" id="syl-cancel">Cancel</button></div>
     </form>
@@ -321,11 +325,19 @@ export function importSyllabusPanel(folderHint = '') {
   name('import-syllabus');
   const status = p.querySelector('#syl-status')!;
   const preview = p.querySelector<HTMLElement>('#syl-preview')!;
+  const fileInput = p.querySelector<HTMLInputElement>('#syl-file')!;
+  const fileName = p.querySelector('#syl-name')!;
+  p.querySelector('#syl-browse')!.addEventListener('click', () => fileInput.click());
+  fileInput.addEventListener('change', () => {
+    const f = fileInput.files?.[0];
+    fileName.textContent = f ? f.name : 'No file chosen';
+    fileName.classList.toggle('on', !!f);
+  });
   p.querySelector('#syl-cancel')!.addEventListener('click', () => tasksPanel(folderHint || null));
   p.querySelector('#syllabus-form')!.addEventListener('submit', async (e) => {
     e.preventDefault();
     const className = (p.querySelector('#syl-class') as HTMLInputElement).value.trim().slice(0, 30);
-    const file = (p.querySelector('#syl-file') as HTMLInputElement).files?.[0];
+    const file = fileInput.files?.[0];
     if (!className) return toast('Enter a class name', 'err');
     if (!file) return toast('Choose a PDF', 'err');
     if (file.size > 8_000_000) return toast('PDF must be under 8 MB', 'err');
@@ -540,14 +552,14 @@ export async function shopPanel(tab: ShopTab = 'shop', source?: HTMLElement) {
     <div class="market-nav"><div class="tabs">${([['shop', 'Flowers'], ['indoor', 'Indoor'], ['outdoor', 'Outdoor'], ['seasons', 'Seasons']] as const).map(([key, label]) => `<button data-t="${key}" class="${tab === key ? 'on' : ''}">${label}</button>`).join('')}</div><span class="market-reset">New stock in <b class="num" data-shop-countdown>--:--:--</b></span></div>`;
   let body = '';
   if (tab !== 'plants' && tab !== 'cards') {
-    const plantCard = (id: number) => { const pl = plantById(id)!; return `<article class="market-product"><b>${pl.name}</b><div class="market-art">${plantImg(id, 'seed-art')}</div><small>${qty(id) ? `Owned ?${qty(id)}` : 'Flower seed'}</small><button class="btn sm sage" data-buy="${id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</button></article>`; };
-    const furnCard = (id: number) => { const f = furnitureById(id)!; return `<article class="market-product" data-area="${furnitureArea(id)}"><b>${f.name}</b><div class="market-art">${furnImg(id)}</div><small>${f.w}?${f.h} tiles${fqty(id) ? ` ? Owned ?${fqty(id)}` : ''}</small><button class="btn sm sage" data-furniture-buy="${id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : f.price)}</button></article>`; };
+    const plantCard = (id: number) => { const pl = plantById(id)!; return `<article class="market-product"><b>${pl.name}</b><div class="market-art">${plantImg(id, 'seed-art')}</div><small>${qty(id) ? `Owned &times;${qty(id)}` : 'Flower seed'}</small><button class="btn sm sage" data-buy="${id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</button></article>`; };
+    const furnCard = (id: number) => { const f = furnitureById(id)!; return `<article class="market-product" data-area="${furnitureArea(id)}"><b>${f.name}</b><div class="market-art">${furnImg(id)}</div><small>${f.w}&times;${f.h} tiles${fqty(id) ? ` &middot; Owned &times;${fqty(id)}` : ''}</small><button class="btn sm sage" data-furniture-buy="${id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : f.price)}</button></article>`; };
     const card = info.card !== null ? CARDS[info.card] : null;
     const title = { shop: 'Flowers for your garden', indoor: 'Make yourself at home', outdoor: 'A place to enjoy the outdoors', seasons: 'Set the scene' }[tab];
     const note = { shop: 'Plant a seed and watch it bloom.', indoor: 'Four new indoor finds every day. Place them inside your house.', outdoor: 'Four new outdoor finds every day. Place them in your garden.', seasons: 'Buy a season once, then select it in your inventory.' }[tab];
-    const products = tab === 'shop' ? info.plants.map(plantCard).join('') : tab === 'seasons' ? SEASONS.filter(s => s.value !== 'auto').map(s => `<article class="market-product market-season"><span class="season-art ${s.value}">${{ summer: '?', rainy: '?', fall: '??', winter: '?' }[s.value as 'summer']}</span><b>${s.label}</b><p>${s.note}</p>${m.seasons.includes(s.value) ? '<span class="owned-label">Owned</span>' : `<button class="btn sm sage" data-season-buy="${s.value}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : SEASON_CHANGE_GEMS)}</button>`}</article>`).join('') : (tab === 'outdoor' ? info.outdoor ?? [] : info.furniture).map(furnCard).join('');
-    body = `<section class="market-stock"><div class="market-section-head"><div><h3>${title}</h3><p>${note}</p></div>${tab === 'shop' ? '<button class="link" data-t="plants">Flower collection ?</button>' : ''}</div><div class="market-products">${products}</div></section>
-      <div class="market-extras"><section class="market-feature"><div class="market-section-head"><h3>Rare finds</h3><button class="link" data-t="cards">Collection ?</button></div>${card ? `<div class="market-card">${cardHtml(card, false)}<div><b>${card.name}</b><p>A little treasure for your card case.</p>${owned.has(card.id) ? '<span class="owned-label">Collected</span>' : `<button class="btn sm rose" data-card="${card.id}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : card.price)} gems</button>`}</div></div>` : '<div class="market-no-card"><span>?</span><b>No rare card today</b><p>Check back when the shop refreshes.</p></div>'}</section>
+    const products = tab === 'shop' ? info.plants.map(plantCard).join('') : tab === 'seasons' ? SEASONS.filter(s => s.value !== 'auto').map(s => `<article class="market-product market-season"><span class="season-art ${s.value}">${{ summer: '&#9728;', rainy: '&#9730;', fall: '&#127810;', winter: '&#10052;' }[s.value as 'summer']}</span><b>${s.label}</b><p>${s.note}</p>${m.seasons.includes(s.value) ? '<span class="owned-label">Owned</span>' : `<button class="btn sm sage" data-season-buy="${s.value}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : SEASON_CHANGE_GEMS)}</button>`}</article>`).join('') : (tab === 'outdoor' ? info.outdoor ?? [] : info.furniture).map(furnCard).join('');
+    body = `<section class="market-stock"><div class="market-section-head"><div><h3>${title}</h3><p>${note}</p></div>${tab === 'shop' ? '<button class="link" data-t="plants">Flower collection &rarr;</button>' : ''}</div><div class="market-products">${products}</div></section>
+      <div class="market-extras"><section class="market-feature"><div class="market-section-head"><h3>Rare finds</h3><button class="link" data-t="cards">Collection &rarr;</button></div>${card ? `<div class="market-card">${cardHtml(card, false)}<div><b>${card.name}</b><p>A little treasure for your card case.</p>${owned.has(card.id) ? '<span class="owned-label">Collected</span>' : `<button class="btn sm rose" data-card="${card.id}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : card.price)} gems</button>`}</div></div>` : '<div class="market-no-card"><span>&#10022;</span><b>No rare card today</b><p>Check back when the shop refreshes.</p></div>'}</section>
       <aside class="spin-box"><h3>🎰 Daily Spin</h3><p>Spin once a day for coins and rare gems. Every spin pays at least <b>${num(spinBaseCoins(u.streak))} coins</b>.</p>
         <div class="machine v3"><img class="mach" src="/assets/ui/spin_machine.png" alt="" /><div class="reels"><div class="reel">${ico('coin', 'lg')}</div><div class="reel">🌱</div><div class="reel">${ico('gem', 'lg')}</div></div>
           <button class="spin-btn" id="spin" ${info.daily.spun && !u.is_admin ? 'disabled' : ''}>${info.daily.spun && !u.is_admin ? 'Come back tomorrow' : 'Spin'}</button><button class="lever3" id="lever" aria-label="Pull the lever" ${info.daily.spun && !u.is_admin ? 'disabled' : ''}></button></div>
@@ -567,7 +579,7 @@ export async function shopPanel(tab: ShopTab = 'shop', source?: HTMLElement) {
     const remaining = Math.max(0, Math.ceil((duration - (performance.now() - receivedAt)) / 1000));
     const label = p.querySelector<HTMLElement>('[data-shop-countdown]')!;
     if (!Number.isFinite(remaining)) { label.textContent = 'Reopen to update'; return; }
-    label.textContent = remaining > 0 ? `${Math.floor(remaining / 3600)}:${String(Math.floor(remaining % 3600 / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}` : 'Refreshing?';
+    label.textContent = remaining > 0 ? `${Math.floor(remaining / 3600)}:${String(Math.floor(remaining % 3600 / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}` : 'Refreshing...';
     if (remaining === 0) {
       p.querySelectorAll<HTMLButtonElement>('[data-buy], [data-furniture-buy], [data-card]').forEach(b => b.disabled = true);
       if (!refreshing && performance.now() >= retryAt) {

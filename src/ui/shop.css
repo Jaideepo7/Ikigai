@@ -1,5 +1,5 @@
 /* Shop uses the same parchment, tabs and pixel buttons as the other menus. */
-.panel.shop-panel { width: min(1120px, calc(100vw - 32px)); padding: 24px; }
+.panel.shop-panel.shop-panel { width: min(1120px, calc(100vw - 32px)); padding: 24px; }
 .shop-panel .shop-shell { padding: 4px 12px 8px 0; overflow-y: auto; overflow-x: hidden; }
 .market-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-right: 38px; }
 .market-head h2 { margin: 0 0 4px; font-size: 32px; }
@@ -35,7 +35,7 @@
 .shop-panel .market-extras .spin-box p { font-size: 15px; margin: 4px 0; }
 .shop-panel .market-extras .machine.v3 { max-width: 320px; margin: 8px auto 0; }
 @media (max-width: 800px) {
- .panel.shop-panel { padding: 18px; }
+ .panel.shop-panel.shop-panel { padding: 18px; }
  .market-head { align-items: start; flex-direction: column; gap: 12px; }
  .market-nav { flex-wrap: wrap; gap: 0; margin: 14px 0; }
  .market-wallet { gap: 12px; }
@@ -49,3 +49,5 @@
  .market-head h2 { font-size: 26px; }
  .market-nav .tabs button { font-size: 15px; padding: 8px 10px; }
 }
+
+.shop-panel .market-section-head .link { background: transparent; border: 0; padding: 4px 0; color: #365b43; font: inherit; font-size: 14px; text-decoration: underline; cursor: pointer; }
