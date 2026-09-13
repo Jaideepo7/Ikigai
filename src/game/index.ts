@@ -1,39 +1,46 @@
 import Phaser from 'phaser';
 import { HouseScene } from './HouseScene';
 import { GardenScene } from './GardenScene';
-import { mountNavbar, tutorial, confirmDialog, isPomodoroActive } from '../ui/panels';
+import { mountNavbar, tutorial, confirmDialog, isPomodoroActive, refreshFriendsIfOpen } from '../ui/panels';
 import { me, on, refreshMe, toast } from '../state';
 import { music, setSfx, unlock, setVolume, setTrack } from '../ui/audio';
 import { api } from '../api';
-import { FRAME } from './Player';
+import { FRAME, CHARACTERS } from './Player';
+import { connectHub } from './hub';
+import { FENCE_COLORS, FURNITURE } from '../shared/rules';
 
 import { W, H } from './tiles';
 export { W, H };
 export let game: Phaser.Game | null = null;
+export const FENCE_PIECES = ['post', 'h_l', 'h_m', 'h_m2', 'h_r', 'v_t', 'v_m', 'v_m2', 'v_b', 'tl', 'tr', 'bl', 'br', 't_up', 't_down', 't_left', 't_right', 'cross', 'gate', 'gate_open'];
+export const POMODORO_LOCK_MSG = 'Garden access is disabled during an active focus session.';
 
 class Boot extends Phaser.Scene {
   constructor() { super('Boot'); }
   preload() {
     this.load.spritesheet('tinytown', '/assets/tiles/tinytown.png', { frameWidth: 16, frameHeight: 16 });
-    this.load.spritesheet('inner', '/assets/tiles/inner.png', { frameWidth: 16, frameHeight: 16 });
     this.load.image('tinytown_img', '/assets/tiles/tinytown.png');
-    this.load.image('inner_img', '/assets/tiles/inner.png');
-    for (let i = 0; i < 3; i++) this.load.image(`crop_${i}`, `/assets/tiles/crop_${i}.png`);
-    for (let i = 0; i < 24; i++) this.load.spritesheet(`char_${i}`, `/assets/chars/char_${i}.png`, { frameWidth: FRAME.w, frameHeight: FRAME.h });
-    for (let i = 0; i < 36; i++) this.load.image(`plant_${i}`, `/assets/plants/plant_${i}.png`);
+    for (let i = 0; i < CHARACTERS; i++) this.load.spritesheet(`char_${i}`, `/assets/chars/char_${i}.png`, { frameWidth: FRAME.w, frameHeight: FRAME.h });
+    for (let i = 1; i <= 20; i++) this.load.image(`flower_${i}`, `/assets/plants/flower_${i}.png`);
+    for (let i = 21; i <= 32; i++) this.load.image(`tree_${i}`, `/assets/plants/tree_${i}.png`);
+    this.load.image('twig', '/assets/plants/twig.png');
+    for (const p of FENCE_PIECES) for (const c of FENCE_COLORS) this.load.image(`fence_${p}_${c}`, `/assets/fence/${p}_${c}.png`);
+    for (const f of FURNITURE) this.load.image(`f_${f.id}`, `/assets/furniture/f_${f.id}.png`);
     for (let i = 0; i < 4; i++) this.load.image(`card_${i}`, `/assets/cards/card_${i}.png`);
+    this.load.image('house_ext', '/assets/scenes/house_ext.png');
+    this.load.image('home_bg', '/assets/scenes/home_bg.png');
+    this.load.image('soil', '/assets/scenes/soil.png');
     this.load.image('flower', '/assets/scenes/flower.png');
-    this.load.image('book', '/assets/tiles/book.png');
   }
   create() {
-    for (let i = 0; i < 24; i++) {
+    for (let i = 0; i < CHARACTERS; i++) {
       const f = (a: number, b: number) => this.anims.generateFrameNumbers(`char_${i}`, { start: a, end: b });
       this.anims.create({ key: `idle_down_${i}`, frames: f(0, 1), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_down_${i}`, frames: f(2, 3), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `walk_down_${i}`, frames: f(2, 3), frameRate: 6, repeat: -1 });
       this.anims.create({ key: `idle_up_${i}`, frames: f(4, 5), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_up_${i}`, frames: f(6, 7), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `walk_up_${i}`, frames: f(6, 7), frameRate: 6, repeat: -1 });
       this.anims.create({ key: `idle_side_${i}`, frames: f(8, 9), frameRate: 2, repeat: -1 });
-      this.anims.create({ key: `walk_side_${i}`, frames: f(10, 11), frameRate: 7, repeat: -1 });
+      this.anims.create({ key: `walk_side_${i}`, frames: f(10, 11), frameRate: 6, repeat: -1 });
     }
     this.scene.start('House', { spawn: 'center' });
   }
@@ -46,6 +53,8 @@ export async function startGame() {
   setSfx(!!u.sfx); setVolume(u.music_volume); setTrack(u.music_track);
   const kick = () => { unlock(); if (u.music) music(true); window.removeEventListener('pointerdown', kick); window.removeEventListener('keydown', kick); };
   window.addEventListener('pointerdown', kick); window.addEventListener('keydown', kick);
+  connectHub();
+  on('friends', refreshFriendsIfOpen);
   if (game) return;
   game = new Phaser.Game({
     type: Phaser.AUTO, parent: 'game', width: W, height: H, pixelArt: true, backgroundColor: '#0b0f0a',
@@ -53,18 +62,18 @@ export async function startGame() {
     physics: { default: 'arcade', arcade: { debug: false } },
     scene: [Boot, HouseScene, GardenScene],
   });
-  (window as any).__game = game; // debugging hook (used by tests/debug_move.mjs)
+  (window as any).__game = game; (window as any).__refresh = refreshMe; // debugging hooks for the e2e scripts
   setInterval(() => refreshMe().catch(() => {}), 60_000);
   on('me', () => { const s = game?.scene.getScenes(true)[0] as any; s?.onMe?.(); });
   if (!u.tutorial_done) setTimeout(tutorial, 1200);
 }
 
-/** Switch scene from UI code (map teleport, exits). A frozen garden blocks going to your own garden. */
+/** Switch scene from UI code (map teleport, exits). A focus session or a frozen garden blocks going to your own garden. */
 export async function goto(scene: 'House' | 'Garden', data: Record<string, unknown> = {}) {
   const active = game?.scene.getScenes(true)[0];
   if (!active) return;
   if (scene === 'Garden' && data.ownerId === me().user.id && isPomodoroActive()) {
-    toast('The garden is closed during a focus session', 'err');
+    toast(POMODORO_LOCK_MSG, 'err');
     return;
   }
   if (scene === 'Garden' && data.ownerId === me().user.id && me().user.frozen) {
@@ -74,4 +83,4 @@ export async function goto(scene: 'House' | 'Garden', data: Record<string, unkno
   }
   active.scene.start(scene, data);
 }
-export function activeScene() { return game?.scene.getScenes(true)[0] as (Phaser.Scene & { uiOpen?: boolean }) | undefined; }
+export function activeScene() { return game?.scene.getScenes(true)[0] as (Phaser.Scene & { startPlacing?: (id: number) => void }) | undefined; }

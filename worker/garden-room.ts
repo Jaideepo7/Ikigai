@@ -5,8 +5,10 @@ import type { Env } from './index';
  * One room per garden owner. Relays movement, chat, typing and emotes between everyone standing in that garden.
  * Visitors join as "pending" while the owner is present: the owner gets a knock and must accept or decline.
  * If the owner is not in the garden, visitors are let in straight away.
+ * The owner's room also carries their "hub" sockets: a lightweight connection every session keeps open so
+ * friend requests / acceptances arrive instantly (POST /notify from the Worker). Hub sockets are never peers.
  */
-interface Peer { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing: boolean; pending: boolean }
+interface Peer { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing: boolean; pending: boolean; hub?: boolean }
 type Msg =
   | { t: 'move'; x: number; y: number; dir: string; moving: boolean }
   | { t: 'chat'; text: string }
@@ -18,11 +20,22 @@ export class GardenRoom extends DurableObject<Env> {
   private ownerId = 0;
 
   async fetch(req: Request): Promise<Response> {
-    const me = JSON.parse(req.headers.get('x-user') || 'null') as { id: number; name: string; character: number; ownerId: number } | null;
+    const url = new URL(req.url);
+    if (url.pathname === '/notify') {
+      const body = await req.text();
+      for (const s of this.ctx.getWebSockets('hub')) { try { s.send(body); } catch { /* closing */ } }
+      return new Response('ok');
+    }
+    const me = JSON.parse(req.headers.get('x-user') || 'null') as { id: number; name: string; character: number; ownerId: number; hub?: boolean } | null;
     if (!me) return new Response('bad', { status: 400 });
     this.ownerId = me.ownerId;
     const pair = new WebSocketPair();
     const [client, server] = [pair[0], pair[1]];
+    if (me.hub) {
+      this.ctx.acceptWebSocket(server, ['hub']);
+      server.serializeAttachment({ id: me.id, hub: true, pending: true } as Peer);
+      return new Response(null, { status: 101, webSocket: client });
+    }
     const ownerHere = this.peers().some((p) => p.id === this.ownerId && !p.pending);
     const pending = me.id !== this.ownerId && ownerHere;
     const peer: Peer = { id: me.id, name: me.name, character: me.character, x: 0, y: 0, dir: 'down', moving: false, typing: false, pending };
@@ -50,6 +63,7 @@ export class GardenRoom extends DurableObject<Env> {
     if (typeof raw !== 'string' || raw.length > 2000) return;
     let m: Msg; try { m = JSON.parse(raw); } catch { return; }
     const peer = ws.deserializeAttachment() as Peer;
+    if (peer.hub) return;
     if (m.t === 'visit' && peer.id === this.ownerId) {
       for (const s of this.ctx.getWebSockets(String(m.id))) {
         const p = s.deserializeAttachment() as Peer;
@@ -90,17 +104,17 @@ export class GardenRoom extends DurableObject<Env> {
   private async drop(ws: WebSocket) {
     const peer = ws.deserializeAttachment() as Peer | null;
     try { ws.close(); } catch { /* already closed */ }
-    if (!peer) return;
+    if (!peer || peer.hub) return;
     if (!peer.pending) this.broadcast({ t: 'leave', id: peer.id });
     if (!this.peers().some((p) => p.id === peer.id && !p.pending)) await this.presence(peer.id, null);
     // owner left: anyone still knocking gets in
-    if (peer.id === this.ownerId) for (const s of this.ctx.getWebSockets()) { const p = s.deserializeAttachment() as Peer; if (p?.pending) this.admit(s, p); }
+    if (peer.id === this.ownerId) for (const s of this.ctx.getWebSockets()) { const p = s.deserializeAttachment() as Peer; if (p?.pending && !p.hub) this.admit(s, p); }
   }
-  private peers(): Peer[] { return this.ctx.getWebSockets().map((s) => s.deserializeAttachment() as Peer).filter(Boolean); }
+  private peers(): Peer[] { return this.ctx.getWebSockets().map((s) => s.deserializeAttachment() as Peer).filter((p) => p && !p.hub); }
   private sendTo(id: number, msg: unknown) { for (const s of this.ctx.getWebSockets(String(id))) { try { s.send(JSON.stringify(msg)); } catch { /* closing */ } } }
   private broadcast(msg: unknown, except?: WebSocket) {
     const s = JSON.stringify(msg);
-    for (const ws of this.ctx.getWebSockets()) if (ws !== except && !(ws.deserializeAttachment() as Peer)?.pending) { try { ws.send(s); } catch { /* closing */ } }
+    for (const ws of this.ctx.getWebSockets()) { const p = ws.deserializeAttachment() as Peer; if (ws !== except && p && !p.pending && !p.hub) { try { ws.send(s); } catch { /* closing */ } } }
   }
   private async presence(userId: number, location: string | null) {
     await this.env.DB.prepare('UPDATE users SET location=?, last_seen=? WHERE id=?').bind(location, Date.now(), userId).run();

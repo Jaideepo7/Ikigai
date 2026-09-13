@@ -38,7 +38,7 @@ app.addEventListener('submit', async (e) => {
   err.textContent = '';
   if (form.dataset.auth === 'signup' && fd.get('password') !== fd.get('verify')) { err.textContent = 'Passwords do not match'; return; }
   try {
-    await api.post(`/api/auth/${form.dataset.auth}`, { username: fd.get('username'), password: fd.get('password') });
+    await api.post(`/api/auth/${form.dataset.auth}`, { username: fd.get('username'), password: fd.get('password'), level: fd.get('level') ? Number(fd.get('level')) : undefined });
     await boot();
   } catch (ex) { err.textContent = (ex as Error).message; }
 });

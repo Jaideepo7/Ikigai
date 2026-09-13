@@ -1,5 +1,6 @@
 import { api } from '../api';
 import { refreshMe, toast } from '../state';
+import { CHARACTERS } from '../game/Player';
 
 const nav = (cta = '') => `<div class="landing-nav"><span class="logo">IKIGAI</span>${cta}</div>`;
 
@@ -24,10 +25,10 @@ ${nav('<a class="btn" data-go="login">GET STARTED</a>')}
   <div class="feature-row">
     <div class="feature-cards">
       <div class="feature-card"><h3>PLANT A TASK</h3><p>Add the assignments you have been avoiding, set a difficulty and an estimate, and earn XP + coins when you finish.</p></div>
-      <div class="feature-card"><h3>GROW YOUR GARDEN</h3><p>Spend coins on seeds, feed your plants, and watch them mature over real hours. Miss your streak and they wither.</p></div>
+      <div class="feature-card"><h3>GROW YOUR GARDEN</h3><p>Spend coins on seeds and furniture, lay out your own fences, and watch plants mature on real timers. Miss your streak and they wither.</p></div>
       <div class="feature-card"><h3>VISIT FRIENDS</h3><p>Add friends with a code, walk around their garden in real time, and chat with speech bubbles.</p></div>
     </div>
-    <img src="/assets/ui/slot_machine.png" alt="Daily spin log machine" style="width:100%;max-width:640px;justify-self:center" />
+    <img src="/assets/ui/spin_machine.png" alt="Daily spin log machine" style="width:100%;max-width:640px;justify-self:center" />
   </div>
 </section>
 <footer class="landing-footer grid-bg">
@@ -41,20 +42,26 @@ ${nav()}
   <h1>${kind === 'login' ? 'Login' : 'Create an Account'}</h1>
   <label>Username</label><input name="username" required minlength="3" maxlength="20" pattern="[A-Za-z0-9_]+" placeholder="CoolCucumber27" autocomplete="username" />
   <label>Password</label><input name="password" type="password" required minlength="6" placeholder="Enter your password" autocomplete="${kind === 'login' ? 'current-password' : 'new-password'}" />
-  ${kind === 'signup' ? '<label>Verify Password</label><input name="verify" type="password" required placeholder="Re-Enter Password" autocomplete="new-password" />' : ''}
+  ${kind === 'signup' ? '<label>Verify Password</label><input name="verify" type="password" required placeholder="Re-Enter Password" autocomplete="new-password" /><div id="admin-level" hidden><label>Admin test account · starting level (0-100)</label><input name="level" type="number" min="0" max="100" value="20" /></div>' : ''}
   <button class="btn-round" type="submit">${kind === 'login' ? 'Login' : 'Create Account'}</button>
   <div class="alt">${kind === 'login' ? 'Need an account? <a data-go="signup">Sign Up!</a>' : 'Have an account? <a data-go="login">Login</a>'}</div>
   <div class="err"></div>
 </form></div>`;
 export const loginScreen = () => authForm('login');
-export const signupScreen = () => authForm('signup');
+export const signupScreen = () => { queueMicrotask(wireSignup); return authForm('signup'); };
+/** The admin test password reveals the level field (a hackathon convenience, not a security boundary). */
+function wireSignup() {
+  const pw = document.querySelector<HTMLInputElement>('input[name=password]'), box = document.getElementById('admin-level');
+  if (!pw || !box) return;
+  pw.addEventListener('input', () => { box.hidden = pw.value !== 'ADMIN_TEST'; });
+}
 
 export const selectScreen = () => {
   queueMicrotask(wireSelect);
   return `${nav()}
 <div class="select-wrap grid-bg"><div class="bunting"></div>
   <h1>Select your gardener</h1>
-  <div class="char-grid">${Array.from({ length: 24 }, (_, i) => `<div class="char-tile" data-char="${i}"><img src="/assets/chars/portrait_${i}.png" alt="Gardener ${i + 1}" /></div>`).join('')}</div>
+  <div class="char-grid five"><div class="char-grid-inner">${Array.from({ length: CHARACTERS }, (_, i) => `<div class="char-tile" data-char="${i}"><img src="/assets/chars/portrait_${i}.png" alt="Gardener ${i + 1}" /></div>`).join('')}</div></div>
 </div>`;
 };
 function wireSelect() {

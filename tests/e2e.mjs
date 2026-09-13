@@ -54,16 +54,17 @@ await a.click('#mini-timer'); await a.click('#p-reset'); await a.keyboard.press(
 await a.keyboard.press('m'); await a.waitForSelector('.hotspot'); await shot(a, '09-map'); await a.keyboard.press('Escape');
 await a.keyboard.press('q'); await a.waitForSelector('#spin'); await a.click('#spin'); await a.waitForTimeout(2600);
 await shot(a, '10-shop');
-await a.click('.shop-tabs button[data-t="cards"]'); await a.waitForTimeout(300); await shot(a, '11-cards');
+await a.click('.shop-main [data-t="cards"]'); await a.waitForTimeout(300); await shot(a, '11-cards');
 await a.keyboard.press('Escape');
 await a.keyboard.press('i'); await a.waitForSelector('.slots'); await shot(a, '12-inventory'); await a.keyboard.press('Escape');
 // walk out the door to the garden
 await hold(a, 'ArrowDown', 1800); await a.waitForTimeout(900);
 await shot(a, '13-garden');
-await hold(a, 'ArrowDown', 1300);
+await hold(a, 'ArrowDown', 1300); await hold(a, 'ArrowLeft', 500);
 await a.keyboard.press('e'); await a.waitForTimeout(400); await shot(a, '14-plot-dialog');
-if (await a.$('#buy')) { await a.click('#buy'); await a.waitForTimeout(600); await a.keyboard.press('e'); await a.waitForTimeout(400); await shot(a, '15-seed-picker'); await a.click('[data-plant]'); await a.waitForTimeout(600); await a.keyboard.press('e'); await a.waitForTimeout(400); await shot(a, '16-plant-info'); if (await a.$('#feed')) await a.click('#feed'); await a.waitForTimeout(600); }
+if (await a.$('#hoe')) { await a.click('#hoe'); await a.waitForTimeout(600); await a.keyboard.press('e'); await a.waitForTimeout(400); await shot(a, '15-seed-picker'); await a.click('[data-plant]'); await a.waitForTimeout(600); await a.keyboard.press('e'); await a.waitForTimeout(400); await shot(a, '16-plant-info'); await a.keyboard.press('Escape'); await a.waitForTimeout(11000); }
 await shot(a, '17-garden-planted');
+await a.click('#g-edit'); await a.waitForSelector('#palette'); await a.waitForTimeout(300); await shot(a, '17b-edit-mode'); await a.click('#pal-done');
 // settings
 await a.keyboard.press('Escape'); await a.waitForSelector('#signout'); await shot(a, '18-settings'); await a.keyboard.press('Escape');
 const codeA = await a.evaluate(() => fetch('/api/friends').then((r) => r.json()).then((d) => d.code));
@@ -75,7 +76,10 @@ await b.fill('input[name=username]', ua + 'b'); await b.fill('input[name=passwor
 await b.click('button.btn-round'); await b.waitForSelector('.char-tile'); await b.click('.char-tile[data-char="7"]'); await b.click('#c-yes'); await b.waitForSelector('#navbar'); await b.waitForTimeout(1500); if (await b.$('#t-skip')) await b.click('#t-skip');
 await b.keyboard.press('m'); await b.waitForSelector('.map-img'); await b.click('.hotspot[data-to="friends"]'); await b.waitForSelector('#fadd');
 await b.fill('#fcode', codeA); await b.click('#fadd'); await b.waitForTimeout(500); await shot(b, '19-friend-request');
+// realtime: alice is told about the request the moment it is sent, bob is told the moment it is accepted
+await a.waitForFunction(() => document.querySelector('#toasts')?.textContent?.includes('sent you a friend request'), null, { timeout: 8000 }); await shot(a, '19b-alice-request-toast');
 await a.evaluate(() => fetch('/api/friends').then((r) => r.json()).then((d) => fetch('/api/friends/accept', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ user_id: d.friends[0].id }) })));
+await b.waitForFunction(() => document.querySelector('#toasts')?.textContent?.includes('accepted your friend request'), null, { timeout: 8000 });
 await b.waitForSelector('[data-visit]', { timeout: 10000 }); await shot(b, '20-friends-online');
 await b.click('[data-visit]'); await b.waitForTimeout(1500); await shot(b, '20b-bob-knocking'); await a.waitForSelector('#knock'); await shot(a, '20c-alice-knock'); await a.click('#k-yes'); await b.waitForTimeout(1500);
 await hold(b, 'ArrowDown', 600);

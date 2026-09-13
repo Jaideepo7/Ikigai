@@ -1,24 +1,24 @@
 import { api } from '../api';
 import { me, level, refreshMe, toast, on, store } from '../state';
-import { goto } from '../game';
+import { goto, activeScene } from '../game';
 import { sfx, music, setSfx, setVolume, setTrack, TRACKS } from './audio';
 import {
-  DAILY_CAP, PLANTS, CARDS, plantById, previewReward, plotsUnlocked, plotPrice, STAGES, caseSlots, gardenTiles,
-  LOOTBOX_PRICE, GEM_PRICE_COINS, FREEZES_PER_MONTH, GROWTH_OPTIONS, growthCost, growthMs, spinBaseCoins, addDays,
-  FURNITURE, FURNITURE_SLOTS, SEASONS, SEASON_CHANGE_GEMS, effectiveSeason, type Season, type Task, type Plot, type FriendRow, type Reel,
+  DAILY_CAP, PLANTS, CARDS, plantById, plantSprite, plantStage, plantReward, growMs, previewReward, plotsUnlocked, STAGES, caseSlots, gardenTiles, MAX_LEVEL,
+  GEM_PRICE_COINS, FREEZES_PER_MONTH, GROWTH_OPTIONS, spinBaseCoins, addDays, FENCE_COLORS,
+  FURNITURE, furnitureById, SEASONS, SEASON_CHANGE_GEMS, effectiveSeason, type Season, type Task, type Plot, type FriendRow, type Reel, type ShopInfo, type FenceColor, type Furniture,
 } from '../shared/rules';
 
 /** Escape user-supplied text before it goes into innerHTML. */
 export const esc = (s: unknown) => String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 const overlay = () => document.getElementById('overlay')!;
 const fmtMin = (m: number) => (m >= 60 ? `${Math.floor(m / 60)}h${m % 60 ? ` ${m % 60}m` : ''}` : `${m} min`);
-const fmtMs = (ms: number) => { const mi = Math.ceil(ms / 60000); return mi >= 60 ? `${Math.floor(mi / 60)}h ${mi % 60}m` : `${mi}m`; };
-const bucket = (m: number) => (m <= 30 ? '0 - 30 min' : m <= 60 ? '30 min - 1 hr' : m <= 180 ? '1 - 3 hrs' : '3+ hrs');
+const fmtMs = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : s >= 60 ? `${Math.floor(s / 60)}m ${s % 60}s` : `${s}s`; };
 const stars = (d: number) => `<span class="stars">${'★'.repeat(d)}<span class="off">${'★'.repeat(3 - d)}</span></span>`;
-const dateOf = (ms: number) => new Date(ms).toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 const err = (e: unknown) => { toast((e as Error).message, 'err'); sfx.error(); };
 const ico = (n: string, cls = '') => `<img class="ico ${cls}" src="/assets/ui/${n}.png" alt="" />`;
 const num = (n: number | string) => `<span class="num">${n}</span>`;
+const plantImg = (id: number, cls = '') => { const p = plantById(id)!; return `<img class="plant-art ${p.kind} ${cls}" src="/assets/plants/${plantSprite(p)}.png" alt="" />`; };
+const furnImg = (id: number, cls = '') => `<img class="furn-art ${cls}" src="/assets/furniture/f_${id}.png" alt="" />`;
 
 // ---------- panel plumbing ----------
 let panelEl: HTMLElement | null = null;
@@ -78,6 +78,13 @@ const dailyBar = () => { const d = me().daily; const pct = Math.min(100, Math.ro
 // ---------- navbar + HUD ----------
 const NAV = [['pomodoro', 'P', 'Pomodoro'], ['tasks', 'T', 'Tasks'], ['map', 'M', 'Map'], ['inventory', 'I', 'Inventory'], ['shop', 'Q', 'Shop'], ['settings', 'Esc', 'Settings']] as const;
 const openers: Record<string, () => void> = { pomodoro: () => pomodoroPanel(), tasks: () => tasksPanel(), map: mapPanel, inventory: () => inventoryPanel(), shop: () => shopPanel(), settings: settingsPanel };
+let navMode: 'house' | 'garden' = 'house';
+const GARDEN_NAV = new Set(['map', 'settings']);
+/** In the garden only Map and Settings stay on the bar (and their hotkeys). */
+export function setNavMode(mode: 'house' | 'garden') {
+  navMode = mode;
+  document.querySelectorAll<HTMLElement>('#navbar [data-open]').forEach((b) => { b.hidden = mode === 'garden' && !GARDEN_NAV.has(b.dataset.open!); });
+}
 export function mountNavbar() {
   if (document.getElementById('navbar')) return;
   const nav = document.createElement('div'); nav.id = 'navbar';
@@ -88,9 +95,9 @@ export function mountNavbar() {
   window.addEventListener('keydown', (e) => {
     const t = e.target as HTMLElement;
     if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.tagName === 'SELECT')) return;
-    if (e.key === 'Escape') { if (panelEl?.dataset.name === 'confirm' || panelEl?.dataset.name === 'tutorial') return; if (panelEl) closePanel(); else settingsPanel(); return; }
+    if (e.key === 'Escape') { if (panelEl?.dataset.name === 'confirm' || panelEl?.dataset.name === 'tutorial') return; if (panelEl) closePanel(); else if (!document.getElementById('palette') && !document.getElementById('fmenu')) settingsPanel(); return; }
     const k = { p: 'pomodoro', t: 'tasks', m: 'map', i: 'inventory', q: 'shop' }[e.key.toLowerCase()];
-    if (k && !e.repeat) { if (panelEl?.dataset.name === k) closePanel(); else { sfx.click(); openers[k](); } }
+    if (k && !e.repeat) { if (navMode === 'garden' && !GARDEN_NAV.has(k)) return; if (panelEl?.dataset.name === k) closePanel(); else { sfx.click(); openers[k](); } }
   });
 }
 function renderHud() {
@@ -248,7 +255,7 @@ export function pomodoroPanel(taskId: number | null = null) {
     <div class="clock"><h2>⏱ Focus Time</h2>${task ? `<p class="sub">${esc(task.name)} · 2× XP when completed</p>` : '<p class="sub">Every finished session is logged to your lifetime stats.</p>'}
       <div class="face"><div class="time num" id="pt">${mmss(work * 60_000)}</div></div><div class="phase" id="pp">ready</div>
       <div class="form-actions"><button class="btn" id="p-start">▶ Start</button><button class="btn rose" id="p-reset">■ Reset</button>${task ? `<button class="btn sage" id="p-done" data-task="${task.id}" disabled title="Finish the focus session first">Complete task</button>` : ''}</div>
-      <div class="dots" id="pd"></div></div>
+      <div class="dots" id="pd"></div><p class="sub" style="margin-top:10px">🔒 Garden access is disabled during an active focus session.</p></div>
     <div><h2>Settings</h2>
       <div class="stepper"><span>Work Duration</span><div><button data-k="work" data-d="-5">−</button><b class="num" id="s-work">${work} min</b><button data-k="work" data-d="5">+</button></div></div>
       <div class="stepper"><span>Break Duration</span><div><button data-k="brk" data-d="-1">−</button><b class="num" id="s-brk">${brk} min</b><button data-k="brk" data-d="1">+</button></div></div>
@@ -303,13 +310,12 @@ function renderMini() {
 
 // ---------- map ----------
 export function mapPanel() {
-  const p = openPanel(`<div class="panel-head"><h2>🗺 Map</h2><p class="sub">Click a place to teleport.</p></div>
-    <div class="map-img"><img src="/assets/ui/map.png" alt="Map" />
-      <button class="hotspot home" style="left:50%;top:35%" data-to="house" aria-label="Home"></button>
-      <button class="hotspot garden" style="left:19%;top:57%" data-to="garden" aria-label="My Garden"></button>
-      <button class="hotspot friends" style="left:86%;top:57%" data-to="friends" aria-label="Friends' Gardens"></button>
-      <div class="hotspot locked" style="left:50%;top:67%" title="Coming soon"><span>${ico('lock', 'sm')} locked</span></div>
-    </div>`, 'wide');
+  const p = openPanel(`<div class="map-img"><img src="/assets/ui/map.png" alt="Map" />
+      <button class="hotspot home" style="left:50%;top:24%" data-to="house" aria-label="Home"></button>
+      <button class="hotspot garden" style="left:17%;top:44%" data-to="garden" aria-label="My Garden"></button>
+      <button class="hotspot friends" style="left:85%;top:45%" data-to="friends" aria-label="Friends' Gardens"></button>
+      <div class="hotspot locked" style="left:50%;top:62%" title="Coming soon"><span>${ico('lock', 'sm')} locked</span></div>
+    </div>`, 'xwide map-panel');
   name('map');
   p.querySelectorAll<HTMLElement>('[data-to]').forEach((b) => b.addEventListener('click', () => {
     sfx.click(); closePanel();
@@ -320,98 +326,107 @@ export function mapPanel() {
 }
 
 // ---------- inventory ----------
-const furnitureIcon = (kind: string) => ({ plant: '🪴', chair: '🪑', dresser: '🗄️', rug: '🟫', bookcase: '📚', sideboard: '🪵' }[kind] ?? '🪑');
 export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' | 'seasons' = 'seeds') {
   const m = me();
   const seeds = m.inventory.filter((i) => i.qty > 0);
+  const atHome = activeScene()?.scene.key === 'House';
   const body = tab === 'seeds'
-    ? `<div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" title="${pl.name} seeds"><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.rarity}</span><span class="qty num">×${s.qty}</span></div>`; }).join('')}${Array.from({ length: Math.max(0, 8 - seeds.length) }, () => `<div class="slot empty">${ico('seedbag', 'bag dim')}<span class="nm">empty</span></div>`).join('')}</div><p class="sub" style="margin-top:10px">Walk onto a plot in your garden and press E to plant a seed. Buy more in the shop (Q).</p>`
+    ? `<div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" title="${pl.name} seeds"><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.kind} · ${pl.rarity}</span><span class="qty num">×${s.qty}</span></div>`; }).join('')}${Array.from({ length: Math.max(0, 8 - seeds.length) }, () => `<div class="slot empty">${ico('seedbag', 'bag dim')}<span class="nm">empty</span></div>`).join('')}</div><p class="sub" style="margin-top:10px">Walk onto a plot in your garden and press E to plant a seed. Buy more in the shop (Q).</p>`
     : tab === 'cards'
-      ? `<div class="card-row">${m.cards.map((c) => cardHtml(CARDS[c.card_id], false, c.slot !== null ? `Case slot ${c.slot + 1}` : 'In storage')).join('') || '<div class="empty-state"><b>No cards yet.</b><span>You can buy cards in the shop.</span></div>'}</div><p class="sub" style="margin-top:10px">Put cards in the case by the bookcase in your home.</p>`
+      ? `<div class="card-row">${m.cards.map((c) => cardHtml(CARDS[c.card_id], false, c.slot !== null ? `Case slot ${c.slot + 1}` : 'In storage')).join('') || '<div class="empty-state"><b>No cards yet.</b><span>A card shows up in the shop now and then.</span></div>'}</div><p class="sub" style="margin-top:10px">Put cards in the case by the bookcase in your home.</p>`
       : tab === 'furniture'
-        ? `<div class="furniture-inventory">${m.furniture.map((owned) => { const f = FURNITURE.find((x) => x.id === owned.furniture_id)!; return `<article class="furniture-item" data-furniture="${f.id}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><div><b>${f.name}</b><small>${owned.slot === null ? 'In storage' : `Room slot ${owned.slot + 1}`}</small></div><select aria-label="Place ${esc(f.name)}"><option value="">Storage</option>${Array.from({ length: FURNITURE_SLOTS }, (_, i) => `<option value="${i}" ${owned.slot === i ? 'selected' : ''}>Room slot ${i + 1}</option>`).join('')}</select></article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to change your bedroom.</span></div>'}</div>`
+        ? `<div class="furniture-inventory">${m.furniture.map((o) => { const f = furnitureById(o.furniture_id); if (!f) return ''; const placed = m.placed.filter((p) => p.furniture_id === f.id).length, free = o.qty - placed; return `<article class="furniture-item" data-furniture="${f.id}">${furnImg(f.id)}<div><b>${f.name}</b><small>Owned ×${o.qty} · ${placed} in the room · ${free} in storage · ${f.w}×${f.h} tiles</small></div>${free > 0 ? `<button class="btn sm sage" data-place="${f.id}" ${atHome ? '' : 'disabled title="Go home to place furniture"'}>Place</button>` : '<span class="owned-label">All placed</span>'}</article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to decorate your home.</span></div>'}</div><p class="sub" style="margin-top:10px">${atHome ? 'Click Place, then click a floor tile. Use Edit room to move pieces or put them back.' : 'Go home to place furniture.'}</p>`
         : (() => { const available = SEASONS.filter((s) => s.value === 'auto' || m.seasons.includes(s.value)); const active = effectiveSeason(m.user.season, new Date().getMonth()); return `<div class="section-copy"><h3>Garden season</h3><p>Choose an owned season. Auto follows the real US season.</p></div><div class="season-grid">${available.map((s) => `<button data-inventory-season="${s.value}" class="season-card ${m.user.season === s.value ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small><em>${m.user.season === s.value ? 'Selected' : 'Use season'}</em></button>`).join('')}</div><p class="season-now">Your garden now shows <b>${active}</b>.</p>`; })();
-  const p = openPanel(`<div class="panel-head"><div><h2>🎒 Inventory</h2><p class="sub">Seeds, cards, and bedroom furniture.</p></div></div>${dailyBar()}
-    <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">🪑 Furniture (${m.furniture.length})</button><button data-t="seasons" class="${tab === 'seasons' ? 'on' : ''}">🍂 Seasons (${m.seasons.length + 1})</button></div>${body}`, 'wide');
+  const p = openPanel(`<div class="panel-head"><div><h2>🎒 Inventory</h2><p class="sub">Seeds, cards, furniture and seasons.</p></div></div>${dailyBar()}
+    <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">🪑 Furniture (${m.furniture.reduce((s, x) => s + x.qty, 0)})</button><button data-t="seasons" class="${tab === 'seasons' ? 'on' : ''}">🍂 Seasons (${m.seasons.length + 1})</button></div>${body}`, 'wide');
   name('inventory');
   p.querySelectorAll<HTMLElement>('.tabs button').forEach((b) => b.addEventListener('click', () => inventoryPanel(b.dataset.t as 'seeds' | 'cards' | 'furniture' | 'seasons')));
-  p.querySelectorAll<HTMLSelectElement>('.furniture-item select').forEach((s) => s.addEventListener('change', async () => {
-    const id = Number(s.closest<HTMLElement>('[data-furniture]')!.dataset.furniture);
-    try { await api.post(`/api/furniture/${id}/place`, { slot: s.value === '' ? null : Number(s.value) }); await refreshMe(); sfx.click(); inventoryPanel('furniture'); } catch (e) { err(e); }
-  }));
+  p.querySelectorAll<HTMLElement>('[data-place]').forEach((b) => b.addEventListener('click', () => { const id = Number(b.dataset.place); closePanel(); sfx.click(); activeScene()?.startPlacing?.(id); }));
   p.querySelectorAll<HTMLElement>('[data-inventory-season]').forEach((b) => b.addEventListener('click', async () => {
     try { await api.post('/api/me/season', { season: b.dataset.inventorySeason }); await refreshMe(); sfx.chime(); toast('Garden season changed', 'reward'); inventoryPanel('seasons'); } catch (e) { err(e); }
   }));
 }
-export function cardHtml(c: { id: number; name: string; rarity: string; art: boolean }, locked: boolean, foot = '') {
-  const art = c.art ? `<img src="/assets/cards/card_${c.id}.png" alt="" />` : `<span>${['🦊', '🦉', '🐟', '🦌', '🐼', '🐇', '🦦', '🦋', '🐈', '🐺', '🔥', '🐉'][c.id] ?? '🐾'}</span>`;
-  return `<div class="tcard ${locked ? 'locked' : ''}"><div class="head rar ${c.rarity}">${locked ? '?' : c.rarity}</div><div class="art">${locked ? ico('lock') : art}</div><div class="nm">${locked ? '???' : c.name}${foot ? `<br/><small>${foot}</small>` : ''}</div></div>`;
+export function cardHtml(c: { id: number; name: string; rarity: string }, locked: boolean, foot = '') {
+  return `<div class="tcard ${locked ? 'locked' : ''}"><div class="head rar ${c.rarity}">${locked ? '?' : c.rarity}</div><div class="art">${locked ? ico('lock') : `<img src="/assets/cards/card_${c.id}.png" alt="" />`}</div><div class="nm">${locked ? '???' : c.name}${foot ? `<br/><small>${foot}</small>` : ''}</div></div>`;
 }
 
 // ---------- shop ----------
-interface ShopInfo { plants: number[]; discovered: number[]; cards: number[]; furniture: number[]; seasons: Season[]; daily: { spun: number } }
-type ShopTab = 'shop' | 'cards' | 'furniture' | 'seasons' | 'plants';
+type ShopTab = 'shop' | 'plants' | 'cards';
+const untilMidnight = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() - d.getTime(); };
+const hhmm = (ms: number) => `${Math.floor(ms / 3600_000)}:${String(Math.floor((ms % 3600_000) / 60_000)).padStart(2, '0')}`;
 export async function shopPanel(tab: ShopTab = 'shop') {
   let info: ShopInfo;
   try { info = await api.get<ShopInfo>('/api/shop'); } catch (e) { return err(e); }
-  const m = me(), u = m.user, owned = new Set(m.cards.map((c) => c.card_id)), disc = new Set(info.discovered);
-  const head = `<header class="shop-head"><div><h2>Welcome to the shop!</h2><p>Choose something for your garden or room.</p></div><div class="shop-currency"><span data-currency="coin">${ico('coin')}<b class="num">${u.is_admin ? '∞' : u.coins}</b><small>coins</small></span><span data-currency="gem">${ico('gem')}<b class="num">${u.is_admin ? '∞' : u.gems}</b><small>gems</small></span></div></header>
-    <nav class="shop-tabs" aria-label="Shop sections"><button data-t="shop" class="${tab === 'shop' ? 'on' : ''}">Seeds</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">Animal cards</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">Furniture</button><button data-t="seasons" class="${tab === 'seasons' ? 'on' : ''}">Seasons</button><button data-t="plants" class="${tab === 'plants' ? 'on' : ''}">Plant book ${disc.size}/${PLANTS.length}</button></nav>`;
+  const m = me(), u = m.user, owned = new Set(info.ownedCards), collected = new Set(info.collected);
+  const qty = (id: number) => m.inventory.find((i) => i.plant_id === id)?.qty ?? 0;
+  const fqty = (id: number) => m.furniture.find((f) => f.furniture_id === id)?.qty ?? 0;
+  const reset = hhmm(untilMidnight());
+  const head = `<header class="shop-head"><div><h2>Welcome to the shop!</h2><p>Use your coins to get plants and furniture. Gems collect rare cards for your home.</p></div>
+    <div class="shop-currency"><span data-currency="coin">${ico('coin')}<b class="num">${u.is_admin ? '∞' : u.coins.toLocaleString()}</b><small>coins</small></span><span data-currency="gem">${ico('gem')}<b class="num">${u.is_admin ? '∞' : u.gems.toLocaleString()}</b><small>gems</small></span><button class="btn sm" id="buygem" title="Buy 1 gem">+1 ${ico('gem', 'sm')} for ${num(GEM_PRICE_COINS)}</button></div></header>`;
   let body = '';
   if (tab === 'shop') {
-    body = `<div class="shop-main"><section><h3>🌱 Seeds</h3><div class="shop-grid">${info.plants.map((id) => { const pl = plantById(id)!; return `<article class="shop-item"><b>${pl.name}</b><span class="rar ${pl.rarity}">${pl.rarity}</span><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="price">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</span><button class="btn sm sage" data-buy="${pl.id}">Buy seed</button></article>`; }).join('')}
-        <div class="shop-item"><b>Mystery Lootbox</b><span class="rar rare">5% rare</span><span style="font-size:44px;line-height:64px">🎁</span><span class="price">${ico('coin', 'sm')} ${num(LOOTBOX_PRICE)}</span><button class="btn sm" id="lootbox">Open</button></div>
-        <div class="shop-item"><b>Gem</b><span class="rar epic">premium</span>${ico('gem', 'lg')}<span class="price">${ico('coin', 'sm')} ${num(GEM_PRICE_COINS)}</span><button class="btn sm" id="buygem">Buy 1 gem</button></div></div>
-        </section><aside class="spin-box"><h3>🎰 Daily Spin</h3><p>Pull the lever ${u.is_admin ? 'as often as you want' : 'once a day'}. Every pull gives at least <b>${num(spinBaseCoins(u.streak))} coins</b>.</p>
-        <div class="machine"><div class="reels"><div class="reel">${ico('coin', 'lg')}</div><div class="reel">🌱</div><div class="reel">${ico('gem', 'lg')}</div></div>
-          <button class="lever" id="spin" ${info.daily.spun && !u.is_admin ? 'disabled' : ''} title="${info.daily.spun && !u.is_admin ? 'Come back tomorrow' : 'Pull the lever'}"><span class="stick"></span><span class="knob"></span></button></div><p>${info.daily.spun && !u.is_admin ? 'Come back tomorrow.' : 'Pull the handle.'}</p></aside></div>`;
+    const plantCard = (id: number) => { const pl = plantById(id)!, n = qty(id); return `<article class="shop-item plant"><b>${pl.name}</b><span class="rar ${pl.rarity}">${pl.kind} · ${pl.rarity}</span><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div>${n ? `<span class="owned-badge">Owned ×${n}</span>` : ''}<button class="btn sm sage" data-buy="${pl.id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</button></article>`; };
+    const furnCard = (id: number) => { const f = furnitureById(id)!, n = fqty(id); return `<article class="shop-item furn"><b>${f.name}</b><span class="rar common">${f.w}×${f.h} tiles</span><div class="furn-box">${furnImg(f.id)}</div>${n ? `<span class="owned-badge">Owned ×${n}</span>` : ''}<button class="btn sm sage" data-furniture-buy="${f.id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : f.price)}</button></article>`; };
+    const card = info.card !== null ? CARDS[info.card] : null;
+    body = `<div class="shop-main">
+      <div class="shop-col">
+        <section><div class="sec-head"><h3>🌱 Plants</h3><span class="reset">Reset: <b class="num">${reset}</b></span><button class="link" data-t="plants">View All →</button></div><div class="shop-grid">${info.plants.map(plantCard).join('')}</div></section>
+        <section><div class="sec-head"><h3>🃏 Cards</h3><span class="reset">Reset: <b class="num">${reset}</b></span><button class="link" data-t="cards">View Collection →</button></div>
+          ${card ? `<div class="card-offer">${cardHtml(card, false)}<div><b>${card.name}</b><p>A rare visitor. Cards are the most precious thing in the shop - one at most, and not every day.</p>${owned.has(card.id) ? '<span class="sold">Sold</span>' : `<button class="btn rose" data-card="${card.id}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : card.price)} gems</button>`}</div></div>` : '<div class="empty-state small"><b>No card in stock today.</b><span>Cards are rare - check back tomorrow.</span></div>'}</section>
+        <section><div class="sec-head"><h3>🪑 Furniture</h3><span class="reset">Reset: <b class="num">${reset}</b></span></div><div class="shop-grid">${info.furniture.map(furnCard).join('')}</div></section>
+        <section><div class="sec-head"><h3>🍂 Seasons</h3><span class="reset">${num(SEASON_CHANGE_GEMS)} gem each · pick them in your inventory</span></div><div class="season-grid four">${SEASONS.filter((s) => s.value !== 'auto').map((s) => { const has = m.seasons.includes(s.value); return `<article class="season-card ${has ? 'on' : ''}"><span class="season-art ${s.value}">${{ summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value as 'summer']}</span><b>${s.label}</b><small>${s.note}</small>${has ? '<em>Owned</em>' : `<button class="btn sm sage" data-season-buy="${s.value}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : SEASON_CHANGE_GEMS)}</button>`}</article>`; }).join('')}</div></section>
+      </div>
+      <aside class="spin-box"><h3>🎰 Daily Spin</h3><p>Spin once a day for coins and rare gems. Every spin pays at least <b>${num(spinBaseCoins(u.streak))} coins</b>.</p>
+        <div class="machine v3"><img class="mach" src="/assets/ui/spin_machine.png" alt="" /><div class="reels"><div class="reel">${ico('coin', 'lg')}</div><div class="reel">🌱</div><div class="reel">${ico('gem', 'lg')}</div></div>
+          <button class="spin-btn" id="spin" ${info.daily.spun && !u.is_admin ? 'disabled' : ''}>${info.daily.spun && !u.is_admin ? 'Come back tomorrow' : 'Spin'}</button><button class="lever3" id="lever" aria-label="Pull the lever" ${info.daily.spun && !u.is_admin ? 'disabled' : ''}></button></div>
+        <p class="sub">${u.is_admin ? 'Admin: spin as often as you want.' : '1 spin per day'}</p></aside></div>`;
   } else if (tab === 'plants') {
-    body = `<div class="shop-grid">${PLANTS.map((pl) => `<div class="shop-item ${disc.has(pl.id) ? '' : 'owned'}"><img src="/assets/plants/plant_${pl.sprite}.png" alt="" style="${disc.has(pl.id) ? '' : 'filter:brightness(0) opacity(.5)'}" /><b>${pl.name}</b><span class="rar ${pl.rarity}">${pl.rarity}</span><span class="price">${disc.has(pl.id) ? 'Discovered' : 'Not collected'}</span></div>`).join('')}</div>`;
-  } else if (tab === 'cards') {
-    body = `<section class="shop-section"><div class="section-copy"><h3>Animal cards</h3><p>Collect cards and show them in your home.</p></div><div class="shop-card-grid">${CARDS.map((c) => `<article class="shop-card-item">${cardHtml(c, owned.has(c.id) ? false : !info.cards.includes(c.id))}${owned.has(c.id) ? '<span class="owned-label">Owned</span>' : `<button class="btn sm rose" data-card="${c.id}">${ico('gem', 'sm')} ${num(c.price)}</button>`}</article>`).join('')}</div></section>`;
-  } else if (tab === 'furniture') {
-    body = `<section class="shop-section"><div class="section-copy"><h3>Bedroom furniture</h3><p>Buy furniture here. Place it from the Furniture part of your inventory.</p></div><div class="furniture-shop">${FURNITURE.map((f) => { const has = m.furniture.some((x) => x.furniture_id === f.id); return `<article class="shop-item ${has ? 'owned' : ''}"><span class="furniture-art">${furnitureIcon(f.kind)}</span><b>${f.name}</b><span class="price">${ico('coin', 'sm')} ${num(f.price)}</span>${has ? '<span class="owned-label">Owned</span>' : `<button class="btn sm sage" data-furniture-buy="${f.id}">Buy</button>`}</article>`; }).join('')}</div></section>`;
-  } else if (tab === 'seasons') {
-    body = `<section class="shop-section season-shop"><div class="section-copy"><h3>Garden seasons</h3><p>Buy a manual season here for ${SEASON_CHANGE_GEMS} gem. Select it from the Seasons part of your inventory. Auto is always available.</p></div><div class="season-grid">${SEASONS.filter((s) => s.value !== 'auto').map((s) => { const has = !info.seasons.includes(s.value); return `<article class="season-card ${has ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small>${has ? '<em>Owned</em>' : `<button class="btn sm sage" data-season-buy="${s.value}">${u.is_admin ? 'Get free' : `${SEASON_CHANGE_GEMS} gem`}</button>`}</article>`; }).join('')}</div></section>`;
+    body = `<section class="collection"><div class="sec-head"><button class="btn sm" data-t="shop">← Back to Shop</button><h3>🌿 Plant Collection</h3><span class="reset">${num(collected.size)} / ${num(PLANTS.length)} collected</span></div><div class="shop-grid five">${PLANTS.map((pl) => `<div class="shop-item ${collected.has(pl.id) ? '' : 'locked'}">${plantImg(pl.id, collected.has(pl.id) ? '' : 'sil')}<b>${collected.has(pl.id) ? pl.name : '???'}</b><span class="rar ${pl.rarity}">${pl.kind} · ${pl.rarity}</span><span class="price">${collected.has(pl.id) ? `Owned ×${qty(pl.id)}` : 'Not collected'}</span></div>`).join('')}</div></section>`;
+  } else {
+    body = `<section class="collection"><div class="sec-head"><button class="btn sm" data-t="shop">← Back to Shop</button><h3>🃏 Card Collection</h3><span class="reset">${num(owned.size)} / ${num(CARDS.length)} collected</span></div><div class="shop-card-grid">${CARDS.map((c) => `<article class="shop-card-item">${cardHtml(c, !owned.has(c.id))}${owned.has(c.id) ? '<span class="owned-label">Owned</span>' : `<span class="price">${ico('gem', 'sm')} ${num(c.price)} when in stock</span>`}</article>`).join('')}</div></section>`;
   }
   const p = openPanel(`<div class="shop-shell">${head}${body}</div>`, 'xwide shop-panel');
   name('shop');
-  p.querySelectorAll<HTMLElement>('.shop-tabs button').forEach((b) => b.addEventListener('click', () => shopPanel(b.dataset.t as ShopTab)));
+  p.querySelectorAll<HTMLElement>('[data-t]').forEach((b) => b.addEventListener('click', () => shopPanel(b.dataset.t as ShopTab)));
   const act = async (fn: () => Promise<unknown>, after: () => void) => { try { await fn(); await refreshMe(); after(); } catch (e) { err(e); } };
   p.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/seed', { plant_id: Number(b.dataset.buy) }), () => { sfx.coin(); toast(`Bought a ${plantById(Number(b.dataset.buy))!.name} seed`); shopPanel(); })));
   p.querySelectorAll<HTMLElement>('[data-card]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/card', { card_id: Number(b.dataset.card) }), () => { sfx.chime(); toast(`${CARDS[Number(b.dataset.card)].name} added to your collection!`, 'reward'); shopPanel(); })));
-  p.querySelectorAll<HTMLElement>('[data-furniture-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/furniture', { furniture_id: Number(b.dataset.furnitureBuy) }), () => { sfx.coin(); toast('Furniture added to your inventory', 'reward'); shopPanel('furniture'); })));
-  p.querySelectorAll<HTMLElement>('[data-season-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/season', { season: b.dataset.seasonBuy }), () => { sfx.chime(); toast('Season added to your inventory', 'reward'); shopPanel('seasons'); })));
-  p.querySelector('#lootbox')?.addEventListener('click', () => act(async () => { const r = await api.post<{ plant_id: number; rarity: string }>('/api/shop/lootbox'); sfx.chime(); toast(`🎁 ${r.rarity.toUpperCase()}: ${plantById(r.plant_id)!.name} seed!`, 'reward'); }, () => shopPanel()));
-  p.querySelector('#buygem')?.addEventListener('click', () => act(() => api.post('/api/shop/gems', { qty: 1 }), () => { sfx.coin(); shopPanel(); }));
-  p.querySelector('#spin')?.addEventListener('click', async () => {
-    const btn = p.querySelector<HTMLButtonElement>('#spin')!, reels = [...p.querySelectorAll<HTMLElement>('.reel')];
+  p.querySelectorAll<HTMLElement>('[data-furniture-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/furniture', { furniture_id: Number(b.dataset.furnitureBuy) }), () => { sfx.coin(); toast(`${furnitureById(Number(b.dataset.furnitureBuy))!.name} added to your inventory`, 'reward'); shopPanel(); })));
+  p.querySelector('#buygem')?.addEventListener('click', () => act(() => api.post('/api/shop/gems', { qty: 1 }), () => { sfx.coin(); shopPanel(tab); }));
+  p.querySelectorAll<HTMLElement>('[data-season-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/season', { season: b.dataset.seasonBuy }), () => { sfx.chime(); toast('Season added to your inventory', 'reward'); shopPanel(); })));
+  const spin = async () => {
+    const btn = p.querySelector<HTMLButtonElement>('#spin')!, lever = p.querySelector<HTMLButtonElement>('#lever')!, reels = [...p.querySelectorAll<HTMLElement>('.reel')];
+    if (btn.disabled) return;
     const icon: Record<Reel, string> = { coin: ico('coin', 'lg'), sprout: '🌱', gem: ico('gem', 'lg') };
-    btn.disabled = true; btn.classList.add('pulled'); sfx.click();
+    btn.disabled = true; lever.disabled = true; lever.classList.add('pulled'); sfx.click();
     try {
       const r = await api.post<{ reels: Reel[]; coins: number; gems: number }>('/api/shop/spin');
       reels.forEach((el) => el.classList.add('spinning'));
       const spinner = setInterval(() => { reels.forEach((el) => { if (el.classList.contains('spinning')) el.innerHTML = [icon.coin, '🌱', icon.gem][Math.floor(Math.random() * 3)]; }); sfx.spin(); }, 90);
       r.reels.forEach((sym, i) => setTimeout(() => { reels[i].classList.remove('spinning'); reels[i].innerHTML = icon[sym]; }, 900 + i * 500));
       setTimeout(async () => { clearInterval(spinner); sfx.coin(); toast(`+${r.coins} coins${r.gems ? ` · +${r.gems} gems!` : ''}`, 'reward'); await refreshMe(); if (panelEl?.dataset.name === 'shop') shopPanel(); }, 2200);
-    } catch (e) { err(e); btn.disabled = false; btn.classList.remove('pulled'); }
-  });
+    } catch (e) { err(e); btn.disabled = false; lever.disabled = false; lever.classList.remove('pulled'); }
+  };
+  p.querySelector('#spin')?.addEventListener('click', spin);
+  p.querySelector('#lever')?.addEventListener('click', spin);
 }
 
 // ---------- settings ----------
 export function settingsPanel() {
-  const m = me(), u = m.user, s = m.stats;
+  const m = me(), u = m.user, s = m.stats, lv = level().level;
   const tog = (k: string, val: number, label: string, hint = '') => `<div class="setting"><span>${label}${hint ? `<br/><small>${hint}</small>` : ''}</span><div class="toggle ${val ? 'on' : ''}" data-k="${k}"><i></i></div></div>`;
   const stat = (k: string, label: string) => `<div><b class="num">${s[k] ?? 0}</b>${label}</div>`;
-  const p = openPanel(`<h2>⚙ Settings</h2><p class="sub">${esc(u.username)} · friend code <b>${u.friend_code}</b>${u.is_admin ? ' · admin' : ''}</p>
+  const p = openPanel(`<h2>⚙ Settings</h2><p class="sub">${esc(u.username)} · friend code <b>${u.friend_code}</b>${u.is_admin ? ' · admin test account' : ''}</p>
+    ${u.is_admin ? `<div class="setting"><span>🧪 Admin level <b class="num" id="lvl-v">${lv}</b><br/><small>0-100. The garden is ${gardenTiles(lv)}×${gardenTiles(lv)} tiles at this level and grows one tile every 5 levels.</small></span><input type="range" id="lvl" min="0" max="${MAX_LEVEL}" value="${lv}" /></div>` : ''}
     ${tog('music', u.music, '🎵 Music')}
     <div class="setting sub-setting"><span>Track</span><div class="choice small" id="tracks">${TRACKS.map((t, i) => `<button data-track="${i}" class="${u.music_track === i ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     <div class="setting sub-setting"><span>Volume <b class="num" id="vol-v">${u.music_volume}</b></span><input type="range" id="vol" min="0" max="100" value="${u.music_volume}" /></div>
     ${tog('sfx', u.sfx, '🔊 Sound effects', 'steps, planting, coins')}
     <div class="setting"><span>❄ Freeze garden<br/><small>Away for a while? Plants will not wither and your streak is safe. Your farm is closed while frozen. ${num(m.freezesLeft)} of ${FREEZES_PER_MONTH} freezes left this month.</small></span><div class="toggle ${u.frozen ? 'on' : ''}" id="freeze"><i></i></div></div>
-    <div class="setting"><span>🌱 Growth pace<br/><small>How long plants take to grow. Faster costs more coins to feed.</small></span><div class="choice small" id="growth">${GROWTH_OPTIONS.map((g) => `<button data-g="${g.value}" class="${u.growth === g.value ? 'on' : ''}" title="${g.desc}">${g.label}</button>`).join('')}</div></div>
+    <div class="setting"><span>🌱 Growth pace<br/><small>How long plants take from seed to fully grown. Patient gardeners earn more when a plant matures.</small></span><div class="choice small" id="growth">${GROWTH_OPTIONS.map((g) => `<button data-g="${g.value}" class="${u.growth === g.value ? 'on' : ''}" title="${g.desc}">${g.label}</button>`).join('')}</div></div>
+    <p class="sub" style="padding-left:28px">${GROWTH_OPTIONS.find((g) => g.value === u.growth)?.desc ?? ''}</p>
     <div class="setting"><span>🎓 Tutorial</span><button class="btn sm" id="tut">Replay walkthrough</button></div>
-    <h3 style="margin:16px 0 4px">📊 Lifetime stats</h3><div class="stats-grid">${stat('tasks_completed', 'tasks completed')}${stat('xp_earned', 'XP earned')}${stat('coins_earned', 'coins earned')}${stat('minutes_worked', 'minutes on tasks')}${stat('pomodoros', 'focus sessions')}${stat('focus_minutes', 'focus minutes')}${stat('best_streak', 'best streak')}${stat('plants_planted', 'plants planted')}${stat('plants_grown', 'plants matured')}${stat('plots_bought', 'plots bought')}${stat('spins', 'daily spins')}${stat('cards_collected', 'cards collected')}</div>
+    <h3 style="margin:16px 0 4px">📊 Lifetime stats</h3><div class="stats-grid">${stat('tasks_completed', 'tasks completed')}${stat('xp_earned', 'XP earned')}${stat('coins_earned', 'coins earned')}${stat('minutes_worked', 'minutes on tasks')}${stat('pomodoros', 'focus sessions')}${stat('focus_minutes', 'focus minutes')}${stat('best_streak', 'best streak')}${stat('plants_planted', 'plants planted')}${stat('plants_grown', 'plants matured')}${stat('plots_bought', 'plots hoed')}${stat('spins', 'daily spins')}${stat('cards_collected', 'cards collected')}</div>
     <div class="form-actions" style="margin-top:18px"><button class="btn rose" id="signout">Sign out</button></div>`);
   name('settings');
   const save = async (body: Record<string, unknown>) => { try { await api.post('/api/me/settings', body); await refreshMe(); } catch (e) { err(e); } };
@@ -421,24 +436,32 @@ export function settingsPanel() {
     await save({ [k]: val });
     if (k === 'music') music(!!val); if (k === 'sfx') setSfx(!!val);
   }));
+  const lvl = p.querySelector<HTMLInputElement>('#lvl');
+  lvl?.addEventListener('input', () => { p.querySelector('#lvl-v')!.textContent = lvl.value; });
+  lvl?.addEventListener('change', async () => { try { await api.post('/api/me/admin-level', { level: Number(lvl.value) }); await refreshMe(); toast(`Level ${lvl.value} · garden ${gardenTiles(Number(lvl.value))}×${gardenTiles(Number(lvl.value))}`, 'reward'); settingsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('#tracks button').forEach((b) => b.addEventListener('click', async () => { p.querySelectorAll('#tracks button').forEach((x) => x.classList.remove('on')); b.classList.add('on'); setTrack(Number(b.dataset.track)); await save({ music_track: Number(b.dataset.track) }); }));
   const vol = p.querySelector<HTMLInputElement>('#vol')!;
   vol.addEventListener('input', () => { setVolume(Number(vol.value)); p.querySelector('#vol-v')!.textContent = vol.value; });
   vol.addEventListener('change', () => save({ music_volume: Number(vol.value) }));
-  p.querySelectorAll<HTMLElement>('#growth button').forEach((b) => b.addEventListener('click', async () => { p.querySelectorAll('#growth button').forEach((x) => x.classList.remove('on')); b.classList.add('on'); await save({ growth: Number(b.dataset.g) }); toast(`Growth pace: ${b.textContent}`); }));
+  p.querySelectorAll<HTMLElement>('#growth button').forEach((b) => b.addEventListener('click', async () => { p.querySelectorAll('#growth button').forEach((x) => x.classList.remove('on')); b.classList.add('on'); await save({ growth: Number(b.dataset.g) }); toast(`Growth pace: ${b.textContent}`); settingsPanel(); }));
   p.querySelector('#freeze')!.addEventListener('click', async () => {
     const on = !u.frozen;
     if (on && !(await confirmDialog('Freeze your garden?', `Your farm closes until you unfreeze it. Plants will not wither and your streak is safe. This uses 1 of your ${m.freezesLeft} remaining freezes this month.`, 'Freeze', 'Not now'))) return settingsPanel();
-    try { await api.post('/api/me/freeze', { on }); await refreshMe(); toast(on ? 'Garden frozen ❄' : 'Garden unfrozen'); } catch (e) { err(e); }
+    try {
+      await api.post('/api/me/freeze', { on }); await refreshMe(); toast(on ? 'Garden frozen ❄' : 'Garden unfrozen');
+      const sc = activeScene() as any;
+      if (on && sc?.scene.key === 'Garden' && sc.ownerId === me().user.id) { closePanel(); toast('Your farm is closed - back to the house'); goto('House', { spawn: 'center' }); return; }
+    } catch (e) { err(e); }
     settingsPanel();
   });
   p.querySelector('#tut')!.addEventListener('click', () => tutorial());
   p.querySelector('#signout')!.addEventListener('click', async () => { await api.post('/api/auth/logout'); location.reload(); });
 }
 
-// ---------- friends (live refresh while open) ----------
+// ---------- friends (live: hub socket + slow poll fallback while open) ----------
 let friendsPoll: number | undefined, friendsLast = '';
 function stopFriendsPoll() { clearInterval(friendsPoll); friendsPoll = undefined; }
+export function refreshFriendsIfOpen() { if (panelEl?.dataset.name === 'friends') { friendsLast = ''; friendsPanel(true); } }
 export async function friendsPanel(silent = false) {
   let data: { friends: FriendRow[]; code: string };
   try { data = await api.get('/api/friends'); } catch (e) { return err(e); }
@@ -449,11 +472,11 @@ export async function friendsPanel(silent = false) {
     <div class="grow"><b>${esc(f.username)}</b><br/><small>${f.status === 'accepted' ? (f.online ? 'in a garden now' : 'offline') : f.status === 'incoming' ? 'wants to be your friend' : 'request sent'}</small></div>
     ${f.status === 'accepted' ? `<button class="btn sm sage" data-visit="${f.id}">Visit</button>` : f.status === 'incoming' ? `<button class="btn sm sage" data-accept="${f.id}">Accept</button>` : ''}<button class="btn sm rose" data-remove="${f.id}" title="${f.status === 'incoming' ? 'Decline' : 'Remove'}">✕</button></div>`;
   const typed = (panelEl?.dataset.name === 'friends' && (panelEl.querySelector('#fcode') as HTMLInputElement | null)?.value) || '';
-  const p = openPanel(`<h2>👥 Friends</h2><p class="sub">Share your code so friends can add you. Visit anyone online to walk around their garden together. Updates live.</p>
+  const p = openPanel(`<h2>👥 Friends</h2><p class="sub">Share your code so friends can add you. Requests and accepts arrive instantly.</p>
     <div class="code-box"><span>Your code</span><span class="code">${data.code}</span><input id="fcode" maxlength="6" placeholder="FRIEND CODE" value="${esc(typed)}" /><button class="btn sm" id="fadd">Add</button></div>
     ${data.friends.map(row).join('') || '<p class="sub">No friends yet. Send someone your code!</p>'}`);
   name('friends');
-  if (!friendsPoll) friendsPoll = window.setInterval(() => friendsPanel(true), 4000);
+  if (!friendsPoll) friendsPoll = window.setInterval(() => friendsPanel(true), 15000);
   p.querySelector('#fadd')!.addEventListener('click', async () => { try { await api.post('/api/friends/request', { code: (p.querySelector('#fcode') as HTMLInputElement).value }); toast('Request sent!'); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('[data-accept]').forEach((b) => b.addEventListener('click', async () => { try { await api.post('/api/friends/accept', { user_id: Number(b.dataset.accept) }); sfx.chime(); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
   p.querySelectorAll<HTMLElement>('[data-remove]').forEach((b) => b.addEventListener('click', async () => { try { await api.del(`/api/friends/${b.dataset.remove}`); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
@@ -478,47 +501,79 @@ export function waitingOverlay(owner: string | null, cancel?: () => void) {
   overlay().appendChild(el);
   el.querySelector('#w-cancel')!.addEventListener('click', () => { el.remove(); cancel?.(); });
 }
-/** Garden HUD (own garden): level, plots, next unlock, quick buttons. */
-export function gardenHud(n: number) {
+
+// ---------- garden HUD + edit palette ----------
+export type EditTool = 'fence' | 'gate' | 'hoe' | 'erase' | 'move';
+export function gardenHud(n: number, h: { onEdit: () => void; onSnapshot: () => void }) {
   const m = me(), lv = level().level, owned = m.plots.length, unlocked = m.user.is_admin ? n * n : plotsUnlocked(lv);
   let el = document.getElementById('garden-hud');
   if (!el) { el = document.createElement('div'); el.id = 'garden-hud'; overlay().appendChild(el); }
-  el.innerHTML = `<b>🌿 Level ${num(lv)} garden</b> <small>${n}×${n} tiles</small><br/>Plots ${num(owned)}/${num(unlocked)}${owned < unlocked ? ` · next ${plotPrice(owned) ? `${ico('coin', 'sm')} ${num(plotPrice(owned))}` : 'free'}` : ` · level ${num(lv + 1)} unlocks more`}${m.user.wither ? `<br/><span style="color:#b55">withering ${m.user.wither}/4 - finish a task today</span>` : ''}
-    <div class="form-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn sm" data-o="inventory">🎒 Seeds</button><button class="btn sm" data-o="shop">🏪 Shop</button></div>`;
-  el.querySelectorAll<HTMLElement>('[data-o]').forEach((b) => b.addEventListener('click', () => openers[b.dataset.o!]()));
+  el.innerHTML = `<b>🌿 Level ${num(lv)} garden</b> <small>${num(n)}×${num(n)} tiles</small><br/>Plots ${num(owned)}/${num(unlocked)}${owned < unlocked ? ' · hoe a tile with E' : ` · level ${num(lv + 1)} unlocks more`}${m.user.wither ? `<br/><span style="color:#b55">withering ${m.user.wither}/4 - finish a task today</span>` : ''}
+    <div class="form-actions" style="justify-content:flex-start;margin-top:6px"><button class="btn sm" id="g-edit">🔨 Edit garden</button><button class="btn sm" id="g-snap">📷 Snapshot</button></div>`;
+  el.querySelector('#g-edit')!.addEventListener('click', () => { sfx.click(); h.onEdit(); });
+  el.querySelector('#g-snap')!.addEventListener('click', () => { sfx.click(); h.onSnapshot(); });
 }
 export function hideGardenHud() { document.getElementById('garden-hud')?.remove(); }
+export function editPalette(o: { tool: EditTool; color: FenceColor; onTool: (t: EditTool) => void; onColor: (c: FenceColor) => void; onDone: () => void }) {
+  document.getElementById('palette')?.remove();
+  const el = document.createElement('div'); el.id = 'palette';
+  const tools: [EditTool, string, string][] = [['fence', '🪵', 'Fence'], ['gate', '🚪', 'Gate'], ['hoe', '⛏', 'Hoe'], ['erase', '🌱', 'Erase / grassify'], ['move', '✋', 'Move']];
+  el.innerHTML = `<b>Build mode</b><div class="tools">${tools.map(([k, i, l]) => `<button data-tool="${k}" class="${k === o.tool ? 'on' : ''}" title="${l}">${i}<span>${l}</span></button>`).join('')}</div>
+    <div class="colors" title="Fence colour">${FENCE_COLORS.map((c) => `<button data-color="${c}" class="sw ${c} ${c === o.color ? 'on' : ''}" title="${c.replace('_', ' ')}"></button>`).join('')}</div>
+    <p>Click a tile. Fence / gate again to remove it. Move: pick up a plot, then click its new tile.</p><button class="btn sm sage" id="pal-done">Done</button>`;
+  overlay().appendChild(el);
+  el.querySelectorAll<HTMLElement>('[data-tool]').forEach((b) => b.addEventListener('click', () => { el.querySelectorAll('[data-tool]').forEach((x) => x.classList.remove('on')); b.classList.add('on'); sfx.click(); o.onTool(b.dataset.tool as EditTool); }));
+  el.querySelectorAll<HTMLElement>('[data-color]').forEach((b) => b.addEventListener('click', () => { el.querySelectorAll('[data-color]').forEach((x) => x.classList.remove('on')); b.classList.add('on'); o.onColor(b.dataset.color as FenceColor); }));
+  el.querySelector('#pal-done')!.addEventListener('click', o.onDone);
+}
+export function hideEditPalette() { document.getElementById('palette')?.remove(); }
+/** House HUD: the Edit room toggle. */
+export function houseHud(h: { onEdit: () => void }, editing = false) {
+  let el = document.getElementById('house-hud');
+  if (!el) { el = document.createElement('div'); el.id = 'house-hud'; overlay().appendChild(el); }
+  el.innerHTML = `<button class="btn sm ${editing ? 'sage' : ''}" id="h-edit">${editing ? '✓ Done editing' : '🪑 Edit room'}</button>${editing ? '<small>Click a piece to move it or put it away</small>' : ''}`;
+  el.querySelector('#h-edit')!.addEventListener('click', () => { sfx.click(); h.onEdit(); });
+}
+export function hideHouseHud() { document.getElementById('house-hud')?.remove(); }
+export function furnitureMenu(title: string, locked: boolean, x: number, y: number, h: { move: () => void; remove: () => void }) {
+  document.getElementById('fmenu')?.remove();
+  const el = document.createElement('div'); el.id = 'fmenu';
+  const canvas = document.querySelector('#game canvas')!.getBoundingClientRect(), s = canvas.width / 1440;
+  el.style.left = `${Math.min(window.innerWidth - 220, canvas.left + x * s)}px`; el.style.top = `${Math.min(window.innerHeight - 160, canvas.top + y * s)}px`;
+  el.innerHTML = `<b>${esc(title)}</b><button id="fm-move">✋ Move</button><button id="fm-remove" ${locked ? 'disabled title="This piece stays in your home"' : ''}>📦 Put in inventory</button><button id="fm-cancel">Cancel</button>`;
+  overlay().appendChild(el);
+  el.querySelector('#fm-move')!.addEventListener('click', () => { el.remove(); h.move(); });
+  el.querySelector('#fm-remove')!.addEventListener('click', () => { el.remove(); h.remove(); });
+  el.querySelector('#fm-cancel')!.addEventListener('click', () => el.remove());
+}
 
 // ---------- garden plot dialog ----------
 export function plotDialog(tx: number, ty: number, plot: Plot | null) {
   const m = me(), lv = level().level;
   let html = '';
   if (!plot) {
-    const owned = m.plots.length, unlocked = m.user.is_admin ? gardenTiles(lv) ** 2 : plotsUnlocked(lv), price = m.user.is_admin ? 0 : plotPrice(owned);
-    const need = Math.ceil((owned + 1 - 4) / 2) + 1;
+    const owned = m.plots.length, unlocked = m.user.is_admin ? gardenTiles(lv) ** 2 : plotsUnlocked(lv);
     html = owned >= unlocked
-      ? `<h2>🌱 Empty ground</h2><p class="sub">All ${unlocked} plots for level ${lv} are in use. Reach level ${need} to unlock more.</p>`
-      : `<h2>🌱 Dig a plot here?</h2><p class="sub">Tile ${tx + 1},${ty + 1} · plot ${owned + 1} of ${unlocked} unlocked · ${price ? `costs ${ico('coin', 'sm')} ${num(price)}` : 'free!'}</p><div class="form-actions"><button class="btn sage" id="buy">Dig plot${price ? ` (${price} coins)` : ''}</button></div>`;
+      ? `<h2>🌱 Empty ground</h2><p class="sub">All ${unlocked} plots for level ${lv} are in use. Level up to unlock more, or grassify a plot you no longer need.</p>`
+      : `<h2>⛏ Hoe a plot here?</h2><p class="sub">Tile ${tx + 1},${ty + 1} · plot ${owned + 1} of ${unlocked} unlocked · free</p><div class="form-actions"><button class="btn sage" id="hoe">Hoe the ground</button></div>`;
   } else if (!plot.plant_id) {
     const seeds = m.user.is_admin ? PLANTS.map((p) => ({ plant_id: p.id, qty: Infinity })) : m.inventory.filter((i) => i.qty > 0);
-    html = `<h2>🌱 Plant a seed</h2><p class="sub">Pick something from your inventory.</p><div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<button class="slot seed" data-plant="${pl.id}"><div class="bag">${ico('seedbag', 'bag')}<img class="pl" src="/assets/plants/plant_${pl.sprite}.png" alt="" /></div><span class="nm">${pl.name}</span><span class="qty num">×${m.user.is_admin ? '∞' : s.qty}</span></button>`; }).join('') || '<p class="sub">No seeds. Visit the shop (Q).</p>'}</div>`;
+    html = `<h2>🌱 Plant a seed</h2><p class="sub">Pick something from your inventory. Flowers take ${GROWTH_OPTIONS.find((g) => g.value === m.user.growth)?.minutes} min, trees twice that.</p><div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<button class="slot seed" data-plant="${pl.id}"><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.kind}</span><span class="qty num">×${m.user.is_admin ? '∞' : s.qty}</span></button>`; }).join('') || '<p class="sub">No seeds. Visit the shop from your house (Q).</p>'}</div>
+      <div class="form-actions"><button class="btn rose sm" id="grass">🌿 Grassify (remove plot)</button></div>`;
   } else {
-    const pl = plantById(plot.plant_id)!, stage = ['Seed', 'Sprout', 'Growing', 'Mature'][plot.stage];
-    const growing = plot.ready_at && plot.ready_at > Date.now();
-    html = `<h2>${pl.name}</h2><p class="sub">${stage} · stage ${plot.stage}/${STAGES}${m.user.wither ? ` · withering ${m.user.wither}/4 - complete tasks to revive` : ''}</p>
-      <div style="text-align:center"><img src="/assets/plants/plant_${pl.sprite}.png" style="height:${[34, 52, 72, 96][plot.stage]}px" alt="" /></div>
-      ${growing ? `<p class="sub" style="text-align:center">Growing... ready in ${fmtMs(plot.ready_at! - Date.now())}</p>`
-        : plot.stage >= STAGES ? '<p class="sub" style="text-align:center">Fully grown. Looking good!</p>'
-        : `<div class="form-actions"><button class="btn sage" id="feed">🌾 Feed (${growthCost(plot.stage, m.user.growth)} coins) · grows in ${fmtMs(growthMs(plot.stage, m.user.growth))}</button></div>`}
-      <div class="form-actions"><button class="btn rose sm" id="clear">Remove plant</button></div>`;
+    const pl = plantById(plot.plant_id)!, now = Date.now(), stage = plantStage(plot, now), names = ['Seed', 'Twig', 'Young', 'Fully grown'], r = plantReward(pl, m.user.growth);
+    const left = plot.ready_at && stage < STAGES ? plot.ready_at - now : 0;
+    html = `<h2>${pl.name}</h2><p class="sub">${names[stage]} · ${pl.kind} · ${pl.rarity}${m.user.wither ? ` · withering ${m.user.wither}/4 - complete tasks to revive` : ''}</p>
+      <div style="text-align:center">${stage === 0 ? '<img src="/assets/scenes/soil.png" style="height:64px" alt="" />' : stage === 1 ? '<img src="/assets/plants/twig.png" style="height:48px" alt="" />' : plantImg(pl.id, stage === 2 ? 'young' : 'grown')}</div>
+      <p class="sub" style="text-align:center">${stage < STAGES ? `Fully grown in ${num(fmtMs(left))} · +${num(r.xp)} XP and +${num(r.coins)} coins when it grows (total ${fmtMs(growMs(pl, m.user.growth))})` : 'Fully grown. Looking good!'}</p>
+      <div class="form-actions"><button class="btn rose sm" id="grass">🌿 Grassify (removes the plant)</button></div><p class="sub" style="text-align:center">Use Edit garden → Move to move it without losing the timer.</p>`;
   }
   const p = openPanel(html);
   name('plot');
   const act = async (fn: () => Promise<unknown>, msg: string) => { try { await fn(); await refreshMe(); sfx.plant(); toast(msg, 'reward'); closePanel(); } catch (e) { err(e); } };
-  p.querySelector('#buy')?.addEventListener('click', () => act(() => api.post('/api/plots/buy', { tx, ty }), 'New plot ready for planting'));
-  p.querySelectorAll<HTMLElement>('[data-plant]').forEach((b) => b.addEventListener('click', () => act(() => api.post(`/api/plots/${plot!.id}/plant`, { plant_id: Number(b.dataset.plant) }), `Planted ${plantById(Number(b.dataset.plant))!.name}. Feed it to start growing.`)));
-  p.querySelector('#feed')?.addEventListener('click', () => act(() => api.post(`/api/plots/${plot!.id}/feed`), 'Fed! Come back when the timer ends.'));
-  p.querySelector('#clear')?.addEventListener('click', async () => { if (await confirmDialog('Remove this plant?', 'The seed is not refunded.', 'Remove', 'Keep')) act(() => api.post(`/api/plots/${plot!.id}/clear`), 'Plot cleared'); });
+  p.querySelector('#hoe')?.addEventListener('click', () => act(() => api.post('/api/plots/hoe', { tx, ty }), 'New plot ready for planting'));
+  p.querySelectorAll<HTMLElement>('[data-plant]').forEach((b) => b.addEventListener('click', () => act(() => api.post(`/api/plots/${plot!.id}/plant`, { plant_id: Number(b.dataset.plant) }), `Planted ${plantById(Number(b.dataset.plant))!.name}. It sprouts in a few seconds.`)));
+  p.querySelector('#grass')?.addEventListener('click', async () => { if (!plot!.plant_id || (await confirmDialog('Grassify this plot?', `The ${plantById(plot!.plant_id)!.name} growing here will be lost.`, 'Grassify', 'Keep'))) act(() => api.post(`/api/plots/${plot!.id}/remove`), 'Back to grass'); });
 }
 
 // ---------- card case (in the house) ----------
@@ -552,13 +607,14 @@ export function sleepPanel() {
 
 // ---------- tutorial ----------
 const STEPS: [string, string][] = [
-  ['Welcome to Ikigai 🌱', 'Your garden only grows when you do. Finish real tasks to earn XP and coins, then spend them on your garden.'],
+  ['Welcome to Ikigai 🌱', 'Your garden only grows when you do. Finish real tasks to earn XP and coins, then spend them on your garden and home.'],
   ['Move around', 'WASD or the arrow keys walk. Hold Shift to run. Press F to wave at friends.'],
-  ['Your task book 📖', 'Press T (or E at your desk) to add tasks with a difficulty and time estimate. Completing them pays XP + coins. Organize them in folders.'],
-  ['Focus timer ⏱', 'Press P for the Pomodoro timer, or ▶ on a task. A task finished after a focus session pays double XP.'],
-  ['The garden 🌿', 'Walk out the bottom door. Stand on a tile and press E to dig a plot, plant a seed, or feed a plant. Feeding starts a real-time growth timer.'],
+  ['Your task book 📖', 'Press T (or E at your desk) to add tasks with a difficulty, due date and time estimate. Completing them pays XP + coins. Organize them in folders.'],
+  ['Focus timer ⏱', 'Press P for the Pomodoro timer, or ▶ on a task. A task started with the timer must finish its focus session first and then pays double XP. The garden is closed while you focus.'],
+  ['The garden 🌿', 'Walk out the bottom door. Stand on a tile and press E to hoe a plot, plant a seed, or grassify it. Plants sprout in seconds and mature on a real timer - hover a plant to see it. Edit garden lets you place fences and gates and move things around.'],
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
-  ['Shop and cards 🏪', 'Press Q for seeds, gems and the daily spin. Gems buy animal cards to display in the case by your bookshelf.'],
+  ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
+  ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
   ['Friends 👥', 'Walk through the door on the right to add friends by code. Visit their garden, wave and chat with Enter. They decide whether to let you in.'],
 ];
 export function tutorial(step = 0) {
@@ -571,3 +627,4 @@ export function tutorial(step = 0) {
   p.querySelector('#t-skip')!.addEventListener('click', () => tutorial(STEPS.length));
 }
 export { store, gardenTiles };
+export type { Furniture };

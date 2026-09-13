@@ -21,8 +21,8 @@ await page.waitForSelector('#navbar'); await page.waitForTimeout(1500);
 // level 6 (12x12 garden), rich, with mature + growing plants, 2 gems worth of cards
 const id = await page.evaluate(() => fetch('/api/me').then((r) => r.json()).then((d) => d.user.id));
 sql(`UPDATE users SET xp=1000, coins=5000, gems=60 WHERE id=${id}`);
-sql(`INSERT INTO plots (user_id,tx,ty,plant_id,stage,ready_at) VALUES (${id},2,2,1,3,NULL),(${id},4,2,14,2,NULL),(${id},6,2,6,1,${Date.now() + 3600000}),(${id},2,4,12,3,NULL),(${id},4,4,7,0,NULL),(${id},8,8,4,3,NULL)`);
-sql(`INSERT INTO cards (user_id,card_id,slot) VALUES (${id},0,0),(${id},2,1),(${id},5,2)`);
+sql(`INSERT INTO plots (user_id,tx,ty,plant_id,stage,planted_at,ready_at) VALUES (${id},3,3,1,3,${Date.now()},NULL),(${id},5,3,29,3,${Date.now()},NULL),(${id},7,3,6,0,${Date.now() - 900000},${Date.now() + 300000}),(${id},3,5,12,3,${Date.now()},NULL),(${id},5,5,7,0,${Date.now()},${Date.now() + 1200000}),(${id},8,8,32,3,${Date.now()},NULL)`);
+sql(`INSERT INTO cards (user_id,card_id,slot) VALUES (${id},0,0),(${id},2,1),(${id},3,2)`);
 await page.reload(); await page.waitForSelector('#navbar'); await page.waitForTimeout(1500);
 await page.screenshot({ path: `${OUT}/30-house-cards.png` });
 if (await page.$('#t-skip')) await page.click('#t-skip');

@@ -1,91 +1,101 @@
 import Phaser from 'phaser';
 import { Player, makeKeys, readInput, typingInDom } from './Player';
-import { me, level } from '../state';
-import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint } from '../ui/panels';
-import { CARDS, FURNITURE, caseSlots } from '../shared/rules';
-import { T, W, H, INNER, layerFrom, block, tile, solidRect } from './tiles';
-import { goto } from './index';
+import { me } from '../state';
+import { api } from '../api';
+import { refreshMe, toast } from '../state';
+import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, houseHud, hideHouseHud, furnitureMenu, setNavMode } from '../ui/panels';
+import { ROOM, furnitureById, furnitureFits, type PlacedFurniture } from '../shared/rules';
+import { T, solidRect } from './tiles';
+import { goto, POMODORO_LOCK_MSG } from './index';
 
 /**
- * The player's room, built from the Zelda-like interior tiles: 20 x 12 tiles at 64px.
- * Hotspots (press E): bed = sleep, desk = task book, bookshelf = card case. Doors: bottom = garden, right = friends.
+ * The player's home, drawn on the room template (1536 x 1024). Furniture lives on a 17 x 7 tile grid on the floor.
+ * Hotspots (press E) attach to placed furniture: bed = sleep, desk = task book, bookcase = card case.
+ * Doors: bottom = garden, right wall = friends. Placement mode comes from the inventory (or the Edit room button).
  */
-const COLS = 20, ROWS = 12;
-const OX = Math.round((W - COLS * T) / 2), OY = Math.round((H - ROWS * T) / 2);
-const px = (c: number) => OX + c * T, py = (r: number) => OY + r * T;
+const ROOM_X0 = 233, ROOM_Y0 = 386, WORLD_W = 1536, WORLD_H = 1024;
+const FLOOR = { x0: 215, y0: 370, x1: 1340, y1: 850 };
+const DOOR = { x0: 700, x1: 870 };
+const FRIENDS_DOOR = { y0: 560, y1: 690 };
 type Spot = 'bed' | 'desk' | 'case';
+type Place = { furniture_id: number; placedId: number | null };
 
 export class HouseScene extends Phaser.Scene {
   player!: Player;
   keys!: Record<string, Phaser.Input.Keyboard.Key>;
-  private cardSprites: Phaser.GameObjects.GameObject[] = [];
-  private furnitureSprites: Phaser.GameObjects.GameObject[] = [];
+  private walls!: Phaser.Physics.Arcade.StaticGroup;
+  private furnitureSprites: Phaser.GameObjects.Image[] = [];
+  private furnitureBodies: Phaser.GameObjects.GameObject[] = [];
   private spots: { kind: Spot; x1: number; y1: number; x2: number; y2: number }[] = [];
+  private grid!: Phaser.GameObjects.Graphics;
+  private ghost?: Phaser.GameObjects.Image;
+  private placing: Place | null = null;
+  private editing = false;
   private exiting = false;
   private ready = false;
   constructor() { super('House'); }
 
   create(data: { spawn?: 'center' | 'door' | 'friends' }) {
-    this.ready = false; this.exiting = false; this.cardSprites = []; this.furnitureSprites = []; this.spots = [];
-    // ---- floor + walls ----
-    const grid: number[][] = [];
-    for (let r = 0; r < ROWS; r++) {
-      const row: number[] = [];
-      for (let c = 0; c < COLS; c++) {
-        if (r === 0) row.push(INNER.wallTop);
-        else if (r === 1) row.push(c === 0 ? INNER.wallL : c === COLS - 1 ? INNER.wallR : INNER.wall);
-        else if (c === 0) row.push(INNER.wallL);
-        else if (c === COLS - 1) row.push(INNER.wallR);
-        else if (r === ROWS - 1 && (c === 9 || c === 10)) row.push(INNER.floor[0]); // doorway
-        else if (r === ROWS - 1) row.push(INNER.wallBottom);
-        else row.push(INNER.floor[(c * 5 + r * 3) % 7 === 0 ? 2 : 0]);
-      }
-      grid.push(row);
-    }
-    layerFrom(this, 'inner_img', grid, OX, OY, -10);
-    this.add.rectangle(0, 0, W, H, 0x0b0f0a).setOrigin(0).setDepth(-20);
-    // wall decor
-    block(this, 'inner', 40, INNER.window, px(7), py(2), -5).setName('home-window-left'); block(this, 'inner', 40, INNER.window, px(13), py(2), -5).setName('home-window-right');
-    block(this, 'inner', 40, INNER.painting, px(10.5), py(2), -5);
-    block(this, 'inner', 40, INNER.door, px(COLS - 0.5), py(8), py(8)); // friends door on the right wall
-    this.add.text(px(COLS - 0.5), py(8) + 6, 'friends', { fontFamily: 'Pixelify Sans', fontSize: '13px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
-    this.add.text(px(10), py(ROWS) - 8, 'garden', { fontFamily: 'Pixelify Sans', fontSize: '13px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 1).setDepth(2000);
+    this.ready = false; this.exiting = false; this.placing = null; this.editing = false; this.furnitureSprites = []; this.furnitureBodies = []; this.spots = [];
+    this.physics.world.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.cameras.main.setBounds(0, 0, WORLD_W, WORLD_H);
+    this.add.image(0, 0, 'home_bg').setOrigin(0).setDepth(-20);
+    // friends door on the right wall (drawn: the template has no side door)
+    const door = this.add.graphics().setDepth(-15);
+    door.fillStyle(0x4a2e14).fillRect(FLOOR.x1 - 14, FRIENDS_DOOR.y0, 40, FRIENDS_DOOR.y1 - FRIENDS_DOOR.y0).fillStyle(0x8b5a2b).fillRect(FLOOR.x1 - 8, FRIENDS_DOOR.y0 + 6, 28, FRIENDS_DOOR.y1 - FRIENDS_DOOR.y0 - 12).fillStyle(0xd9a23c).fillCircle(FLOOR.x1 - 2, (FRIENDS_DOOR.y0 + FRIENDS_DOOR.y1) / 2, 4);
+    this.add.text(FLOOR.x1 + 6, FRIENDS_DOOR.y0 - 6, 'friends', { fontFamily: 'Pixelify Sans', fontSize: '14px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 1).setDepth(2000);
+    this.add.text((DOOR.x0 + DOOR.x1) / 2, FLOOR.y1 + 60, 'garden', { fontFamily: 'Pixelify Sans', fontSize: '14px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 3 }).setOrigin(0.5, 0).setDepth(2000);
 
-    // ---- furniture (bottom-centre anchored blocks) ----
-    const walls = this.physics.add.staticGroup();
-    const solid = (c1: number, r1: number, c2: number, r2: number) => solidRect(this, walls, px(c1), py(r1), (c2 - c1) * T, (r2 - r1) * T);
-    block(this, 'inner', 40, INNER.rug, px(10), py(9), -8);
-    block(this, 'inner', 40, INNER.bed, px(2), py(5)); solid(1, 2.6, 3, 5);
-    block(this, 'inner', 40, INNER.dresser, px(4), py(4)); solid(3, 2.6, 5, 4);
-    block(this, 'inner', 40, INNER.stove, px(6), py(4)); solid(5, 2.6, 7, 4);
-    block(this, 'inner', 40, INNER.table, px(14.5), py(5)); tile(this, 'inner', INNER.chair, px(14.5), py(6)); solid(13, 2.8, 16, 5);
-    this.add.image(px(14.5), py(4) - 12, 'book').setScale(3).setDepth(py(5) + 1);
-    block(this, 'inner', 40, INNER.bookshelf, px(17.5), py(4)); solid(16, 2.6, 19, 4);
-    block(this, 'inner', 40, INNER.sideboard, px(2.5), py(11)); solid(1, 9.6, 4, 11);
-    block(this, 'inner', 40, INNER.plantTall, px(1.5), py(7)); solid(1, 6.3, 2, 7);
-    tile(this, 'inner', INNER.plant, px(18.5), py(11)); solid(18, 10.4, 19, 11);
-    tile(this, 'inner', INNER.plant, px(12.5), py(11)); solid(12, 10.4, 13, 11);
-    // walls: top (below the wall rows), sides, bottom with the doorway gap, right wall with the friends door gap
-    solid(0, 0, COLS, 2); solid(0, 0, 1, ROWS); solid(COLS - 1, 0, COLS, 6.9); solid(COLS - 1, 8.1, COLS, ROWS);
-    solid(0, ROWS - 1, 9, ROWS); solid(11, ROWS - 1, COLS, ROWS);
-    this.spots = [
-      { kind: 'bed', x1: px(1), y1: py(4), x2: px(4), y2: py(6.5) },
-      { kind: 'desk', x1: px(12.5), y1: py(4.5), x2: px(16.5), y2: py(7) },
-      { kind: 'case', x1: px(15.5), y1: py(3.5), x2: px(19), y2: py(6) },
-    ];
+    this.walls = this.physics.add.staticGroup();
+    const solid = (x: number, y: number, w: number, h: number) => solidRect(this, this.walls, x, y, w, h);
+    solid(0, 0, WORLD_W, FLOOR.y0 - 30);
+    solid(0, 0, FLOOR.x0, WORLD_H);
+    solid(FLOOR.x1, 0, WORLD_W - FLOOR.x1, FRIENDS_DOOR.y0); solid(FLOOR.x1, FRIENDS_DOOR.y1, WORLD_W - FLOOR.x1, WORLD_H - FRIENDS_DOOR.y1);
+    solid(0, FLOOR.y1 + 20, DOOR.x0, WORLD_H - FLOOR.y1); solid(DOOR.x1, FLOOR.y1 + 20, WORLD_W - DOOR.x1, WORLD_H - FLOOR.y1);
 
-    const spawn = data.spawn === 'door' ? [px(10), py(11) - 4] : data.spawn === 'friends' ? [px(18), py(8)] : [px(10), py(8)];
+    this.grid = this.add.graphics().setDepth(3).setVisible(false);
+    this.grid.lineStyle(1, 0xf0ebcc, 0.35);
+    for (let i = 0; i <= ROOM.cols; i++) this.grid.lineBetween(ROOM_X0 + i * T, ROOM_Y0, ROOM_X0 + i * T, ROOM_Y0 + ROOM.rows * T);
+    for (let j = 0; j <= ROOM.rows; j++) this.grid.lineBetween(ROOM_X0, ROOM_Y0 + j * T, ROOM_X0 + ROOM.cols * T, ROOM_Y0 + j * T);
+
+    const spawn = data.spawn === 'door' ? [(DOOR.x0 + DOOR.x1) / 2, FLOOR.y1 - 10] : data.spawn === 'friends' ? [FLOOR.x1 - 60, (FRIENDS_DOOR.y0 + FRIENDS_DOOR.y1) / 2 + 30] : [(DOOR.x0 + DOOR.x1) / 2, ROOM_Y0 + 4 * T];
     this.player = new Player(this, spawn[0], spawn[1], me().user.character ?? 0, me().user.username, true);
-    this.physics.add.collider(this.player, walls);
+    this.player.setCollideWorldBounds(true);
+    this.physics.add.collider(this.player, this.walls);
+    this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.keys = makeKeys(this);
-    this.input.keyboard!.on('keydown-E', () => { if (!isPanelOpen() && !typingInDom()) this.interact(); });
+    this.input.keyboard!.on('keydown-E', () => { if (!isPanelOpen() && !typingInDom() && !this.placing) this.interact(); });
     this.input.keyboard!.on('keydown-F', () => { if (!isPanelOpen() && !typingInDom()) this.player.emote('wave'); });
-    this.drawCards();
+    this.input.keyboard!.on('keydown-ESC', () => { if (this.placing && !isPanelOpen()) this.stopPlacing(); else if (this.editing && !isPanelOpen()) this.setEditing(false); });
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.moveGhost(p));
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { if (this.placing && !isPanelOpen()) this.placeAt(p); });
     this.drawFurniture();
-    setHint('WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, shelf = cards · F wave · bottom door = garden · right door = friends');
+    setNavMode('house');
+    houseHud({ onEdit: () => this.setEditing(!this.editing) });
+    this.events.once('shutdown', () => { hideHouseHud(); document.getElementById('fmenu')?.remove(); });
+    setHint('WASD / arrows move · Shift run · E: bed = sleep, desk = tasks, bookcase = cards · F wave · bottom door = garden · right door = friends');
     this.ready = true;
   }
-  onMe() { if (this.ready) { this.drawCards(); this.drawFurniture(); } }
+  onMe() { if (this.ready) this.drawFurniture(); }
+
+  // ---------- furniture ----------
+  private tileToPx(cx: number, cy: number, w: number, h: number) { return { x: ROOM_X0 + (cx + w / 2) * T, y: ROOM_Y0 + (cy + h) * T }; }
+  private tileAt(x: number, y: number): [number, number] { return [Math.floor((x - ROOM_X0) / T), Math.floor((y - ROOM_Y0) / T)]; }
+  private drawFurniture() {
+    this.furnitureSprites.forEach((s) => s.destroy()); this.furnitureSprites = [];
+    this.furnitureBodies.forEach((b) => b.destroy()); this.furnitureBodies = []; this.spots = [];
+    for (const p of me().placed) {
+      const f = furnitureById(p.furniture_id); if (!f) continue;
+      const { x, y } = this.tileToPx(p.cx, p.cy, f.w, f.h);
+      const im = this.add.image(x, y, `f_${f.id}`).setOrigin(0.5, 1).setDepth(f.kind === 'rug' ? -5 : y - (f.kind === 'walk' ? 20 : 0)).setName(`room-furniture-${p.id}`);
+      im.setInteractive();
+      im.on('pointerdown', (ptr: Phaser.Input.Pointer, _lx: number, _ly: number, ev: Phaser.Types.Input.EventData) => { if (this.editing && !this.placing && !isPanelOpen()) { ev.stopPropagation(); this.openMenu(p, ptr); } });
+      this.furnitureSprites.push(im);
+      if (f.kind !== 'rug' && f.kind !== 'walk') this.furnitureBodies.push(solidRect(this, this.walls, ROOM_X0 + p.cx * T + 6, ROOM_Y0 + p.cy * T + 6, f.w * T - 12, f.h * T - 12));
+      const spot = f.kind === 'bed' ? 'bed' : f.kind === 'desk' ? 'desk' : f.kind === 'bookcase' ? 'case' : null;
+      if (spot) this.spots.push({ kind: spot, x1: ROOM_X0 + (p.cx - 1) * T, y1: ROOM_Y0 + (p.cy - 1) * T, x2: ROOM_X0 + (p.cx + f.w + 1) * T, y2: ROOM_Y0 + (p.cy + f.h + 1) * T });
+    }
+  }
   private spotAt(): Spot | null {
     const { x, y } = this.player;
     return this.spots.find((s) => x > s.x1 && x < s.x2 && y > s.y1 && y < s.y2)?.kind ?? null;
@@ -97,42 +107,51 @@ export class HouseScene extends Phaser.Scene {
     else if (s === 'case') cardCasePanel();
   }
 
-  /** Placed cards show on the bookshelf as small framed pictures. */
-  private drawCards() {
-    this.cardSprites.forEach((s) => s.destroy()); this.cardSprites = [];
-    const placed = me().cards.filter((c) => c.slot !== null);
-    const slots = caseSlots(level().level);
-    for (let i = 0; i < slots; i++) {
-      const col = i % 4, row = Math.floor(i / 4);
-      const x = px(16.35) + col * 46, y = py(2.55) + row * 44;
-      this.cardSprites.push(this.add.rectangle(x, y, 40, 36, 0x3d2915).setStrokeStyle(2, 0xd9c8a5).setDepth(py(4) + 2));
-      const c = placed.find((p) => p.slot === i);
-      if (!c) continue;
-      const card = CARDS[c.card_id];
-      if (card.art) this.cardSprites.push(this.add.image(x, y, `card_${card.id}`).setDisplaySize(36, 32).setDepth(py(4) + 3));
-      else this.cardSprites.push(this.add.text(x, y, card.name.split(' ').map((w) => w[0]).join(''), { fontFamily: 'Pixelify Sans', fontSize: '15px', color: '#F0EBCC' }).setOrigin(0.5).setDepth(py(4) + 3));
-    }
+  // ---------- placement / editing ----------
+  private setEditing(on: boolean) {
+    this.editing = on; this.grid.setVisible(on || !!this.placing);
+    houseHud({ onEdit: () => this.setEditing(!this.editing) }, on);
+    setHint(on ? 'Edit room: click a piece to move it or put it back in your inventory · Esc when done' : null);
+    if (!on) document.getElementById('fmenu')?.remove();
   }
-
-  /** Draw the four room slots from the Furniture part of the inventory. */
-  private drawFurniture() {
-    this.furnitureSprites.forEach((s) => s.destroy()); this.furnitureSprites = [];
-    const positions = [[5.5, 8.5], [8, 6], [12.5, 10.5], [16.5, 8.5]] as const;
-    for (const owned of me().furniture.filter((f) => f.slot !== null)) {
-      const item = FURNITURE.find((f) => f.id === owned.furniture_id);
-      const pos = positions[owned.slot!];
-      if (!item || !pos) continue;
-      const [c, r] = pos;
-      let object: Phaser.GameObjects.GameObject;
-      if (item.kind === 'plant') object = tile(this, 'inner', INNER.plant, px(c), py(r));
-      else if (item.kind === 'chair') object = tile(this, 'inner', INNER.chair, px(c), py(r));
-      else {
-        const blocks = { dresser: INNER.dresser, rug: INNER.rug, bookcase: INNER.bookshelf, sideboard: INNER.sideboard };
-        object = block(this, 'inner', 40, blocks[item.kind], px(c), py(r), item.kind === 'rug' ? -7 : undefined);
-      }
-      object.setName(`room-furniture-${owned.slot}`);
-      this.furnitureSprites.push(object);
-    }
+  /** Called from the inventory: pick a piece, then click a tile. */
+  startPlacing(furniture_id: number, placedId: number | null = null) {
+    this.stopPlacing();
+    const f = furnitureById(furniture_id); if (!f) return;
+    this.placing = { furniture_id, placedId };
+    this.ghost = this.add.image(0, 0, `f_${f.id}`).setOrigin(0.5, 1).setAlpha(0.7).setDepth(5000).setVisible(false);
+    this.grid.setVisible(true);
+    setHint(`Placing ${f.name}: click a floor tile (one tile of space around furniture) · Esc to cancel`);
+  }
+  private stopPlacing() {
+    this.placing = null; this.ghost?.destroy(); this.ghost = undefined; this.grid.setVisible(this.editing);
+    setHint(null);
+  }
+  private moveGhost(p: Phaser.Input.Pointer) {
+    if (!this.placing || !this.ghost) return;
+    const f = furnitureById(this.placing.furniture_id)!;
+    const [cx, cy] = this.tileAt(p.worldX - (f.w * T) / 2 + T / 2, p.worldY - (f.h * T) / 2 + T / 2);
+    const ok = furnitureFits(me().placed, f, cx, cy, this.placing.placedId ?? -1);
+    const { x, y } = this.tileToPx(cx, cy, f.w, f.h);
+    this.ghost.setPosition(x, y).setVisible(true).setTint(ok ? 0xbcffbc : 0xff9a9a);
+  }
+  private async placeAt(p: Phaser.Input.Pointer) {
+    if (!this.placing) return;
+    const f = furnitureById(this.placing.furniture_id)!;
+    const [cx, cy] = this.tileAt(p.worldX - (f.w * T) / 2 + T / 2, p.worldY - (f.h * T) / 2 + T / 2);
+    if (!furnitureFits(me().placed, f, cx, cy, this.placing.placedId ?? -1)) { toast('It does not fit there - keep one tile free around furniture', 'err'); return; }
+    try {
+      if (this.placing.placedId !== null) await api.post(`/api/furniture/${this.placing.placedId}/move`, { cx, cy });
+      else await api.post('/api/furniture/place', { furniture_id: f.id, cx, cy });
+      await refreshMe(); this.stopPlacing(); toast(`${f.name} placed`, 'reward');
+    } catch (e) { toast((e as Error).message, 'err'); }
+  }
+  private openMenu(p: PlacedFurniture, ptr: Phaser.Input.Pointer) {
+    const f = furnitureById(p.furniture_id)!;
+    furnitureMenu(f.name, !!p.locked, ptr.x, ptr.y, {
+      move: () => this.startPlacing(p.furniture_id, p.id),
+      remove: async () => { try { await api.post(`/api/furniture/${p.id}/remove`); await refreshMe(); toast(`${f.name} is back in your inventory`); } catch (e) { toast((e as Error).message, 'err'); } },
+    });
   }
 
   update(_t: number, dt: number) {
@@ -140,25 +159,16 @@ export class HouseScene extends Phaser.Scene {
     const [vx, vy, run] = isPanelOpen() || typingInDom() ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     const s = this.spotAt();
-    setHint(isPanelOpen() ? null : s === 'bed' ? 'E: sleep and see your day' : s === 'desk' ? 'E: open your task book' : s === 'case' ? 'E: open the card case' : null);
+    if (!this.placing && !this.editing) setHint(isPanelOpen() ? null : s === 'bed' ? 'E: sleep and see your day' : s === 'desk' ? 'E: open your task book' : s === 'case' ? 'E: open the card case' : null);
     const { x, y } = this.player;
-    if (y > py(ROWS) - 2 && x > px(9) && x < px(11)) { this.exiting = true; this.leaveToGarden(); }
-    else if (x > px(COLS - 1) - 6 && y > py(6.9) && y < py(8.2)) { this.player.x = px(COLS - 1) - 50; this.player.setFacing('left', false); friendsPanel(); }
+    if (y > FLOOR.y1 + 40 && x > DOOR.x0 && x < DOOR.x1) { this.exiting = true; this.leaveToGarden(); }
+    else if (x > FLOOR.x1 - 10 && y > FRIENDS_DOOR.y0 && y < FRIENDS_DOOR.y1 + 20) { this.player.x = FLOOR.x1 - 50; this.player.setFacing('left', false); friendsPanel(); }
   }
   private async leaveToGarden() {
     const data = { ownerId: me().user.id, spawn: 'porch' };
-    if (isPomodoroActive()) {
-      this.player.setVelocity(0, 0); this.player.y = py(ROWS) - 70; this.player.setFacing('up', false);
-      this.exiting = false;
-      return;
-    }
-    if (me().user.frozen) {
-      // goto() shows the unfreeze dialog; if the user declines, step back inside
-      this.player.setVelocity(0, 0); this.player.y = py(ROWS) - 70; this.player.setFacing('up', false);
-      await goto('Garden', data);
-      this.exiting = false;
-      return;
-    }
+    const stepBack = () => { this.player.setVelocity(0, 0); this.player.y = FLOOR.y1 - 30; this.player.setFacing('up', false); this.exiting = false; };
+    if (isPomodoroActive()) { toast(POMODORO_LOCK_MSG, 'err'); stepBack(); return; }
+    if (me().user.frozen) { stepBack(); await goto('Garden', data); return; }   // goto() shows the unfreeze dialog
     this.cameras.main.fadeOut(250, 11, 15, 10);
     this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Garden', data));
   }

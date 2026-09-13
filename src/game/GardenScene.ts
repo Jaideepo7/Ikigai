@@ -3,17 +3,19 @@ import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { Net, type PeerState } from './net';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
-import { isPanelOpen, isPomodoroActive, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud } from '../ui/panels';
-import { TILE, gardenTiles, plantById, WITHER_MAX, effectiveSeason, type GardenSeason, type Plot, type GardenView } from '../shared/rules';
-import { T, W, H, TT, layerFrom, tile, solidRect } from './tiles';
+import { isPanelOpen, isPomodoroActive, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
+import { gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
+import { T, W, H, TT, layerFrom, solidRect } from './tiles';
 
-
-const MARGIN = 4;          // grass tiles around the fence
-const HOUSE_W = 7, HOUSE_H = 4;
+const MARGIN = 3;          // grass tiles around the editable garden
+const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
+const PLANT_H = { flower: 54, tree: 150, twig: 30 };
 
 /**
- * Procedural garden on Kenney Tiny Town tiles. Grows with level: an N x N fenced grid, the whole house above it,
- * trees and props in the margin. Own garden: E on a tile to buy / plant / feed. Friends: walk, wave, chat.
+ * The garden: an N x N editable grid (N from level) below the house, with a grass margin around it.
+ * Everything inside the grid is placed by the owner: fences / gates (autotiled), plots (soil) and plants.
+ * Own garden: E on a tile = plot dialog, the Edit button = build mode with a palette and mouse placement.
+ * Friends' gardens are read-only; both host realtime peers (move / chat / wave) and the knock flow.
  */
 export class GardenScene extends Phaser.Scene {
   player!: Player;
@@ -23,159 +25,195 @@ export class GardenScene extends Phaser.Scene {
   private n = 12;
   private cols = 0; private rows = 0;
   private ox = 0; private oy = 0;               // world px of tile (0,0)
-  private gc0 = 0; private gr0 = 0;             // garden interior origin (tile coords)
+  private gc0 = 0; private gr0 = 0;             // garden grid origin (tile coords)
+  private worldW = 0; private worldH = 0;
+  private walls!: Phaser.Physics.Arcade.StaticGroup;
   private plotLayer!: Phaser.GameObjects.Container;
+  private fenceLayer!: Phaser.GameObjects.Container;
+  private plantBodies: Phaser.GameObjects.GameObject[] = [];
+  private fenceBodies: Phaser.GameObjects.GameObject[] = [];
+  private gates: { tx: number; ty: number; img: Phaser.GameObjects.Image; open: boolean; vertical: boolean }[] = [];
   private highlight!: Phaser.GameObjects.Rectangle;
+  private grid!: Phaser.GameObjects.Graphics;
   private freeze?: Phaser.GameObjects.Container;
   private net?: Net;
   private peers = new Map<number, Player>();
-  private timerTexts: Phaser.GameObjects.Text[] = [];
   private exiting = false;
   private ready = false;
   private doorX = 0; private doorY = 0;
   private chatEl?: HTMLDivElement;
   private shownSeason?: GardenSeason;
+  private edit: { tool: EditTool; moving: number | null } | null = null;
+  private hoverPlot: Plot | null = null;
+  private tipEl?: HTMLDivElement;
+  private pendingRefresh = false;
   constructor() { super('Garden'); }
 
   async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
-    this.teardown(); this.ready = false; this.exiting = false;
+    this.teardown(); this.ready = false; this.exiting = false; this.edit = null;
     this.ownerId = data.ownerId;
     const own = this.ownerId === me().user.id;
     this.view = own
-      ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season }, plots: me().plots }
+      ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences }
       : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
     if (!this.view) return this.scene.start('House', { spawn: 'center' });
 
-    // ---- layout in tiles ----
+    // ---- layout ----
     this.n = gardenTiles(this.view.owner.level);
-    this.cols = this.n + 2 * MARGIN; this.rows = 1 + HOUSE_H + 2 + this.n + 2 + MARGIN;
-    const worldW = Math.max(W, this.cols * T), worldH = Math.max(H, this.rows * T);
-    this.ox = Math.round((worldW - this.cols * T) / 2); this.oy = Math.round((worldH - this.rows * T) / 2);
-    this.physics.world.setBounds(0, 0, worldW, worldH);
-    this.cameras.main.setBounds(0, 0, worldW, worldH);
-    const cx = Math.floor(this.cols / 2);           // door column
-    const houseC0 = cx - Math.floor(HOUSE_W / 2), houseR0 = 1;
-    const fenceR0 = houseR0 + HOUSE_H + 2, fenceR1 = fenceR0 + this.n + 1;   // fence rows (top, bottom)
-    const fenceC0 = MARGIN - 1, fenceC1 = MARGIN + this.n;                     // fence cols (left, right)
-    this.gc0 = MARGIN; this.gr0 = fenceR0 + 1;
+    this.cols = this.n + 2 * MARGIN; this.rows = HOUSE_ROWS + this.n + MARGIN;
+    this.worldW = Math.max(W, this.cols * T); this.worldH = Math.max(H, this.rows * T);
+    this.ox = Math.round((this.worldW - this.cols * T) / 2); this.oy = Math.round((this.worldH - this.rows * T) / 2);
+    this.physics.world.setBounds(0, 0, this.worldW, this.worldH);
+    this.cameras.main.setBounds(0, 0, this.worldW, this.worldH);
+    this.gc0 = MARGIN; this.gr0 = HOUSE_ROWS;
+    const cx = this.gc0 + Math.floor(this.n / 2);   // door / path column
     const rnd = new Phaser.Math.RandomDataGenerator([String(this.ownerId)]);
 
-    // ---- ground layer ----
+    // ---- ground ----
     const g: number[][] = [];
     for (let r = 0; r < this.rows; r++) {
       const row: number[] = [];
-      for (let c = 0; c < this.cols; c++) row.push(rnd.frac() < 0.06 ? TT.grassFlower : TT.grass[rnd.between(0, 1)]);
+      for (let c = 0; c < this.cols; c++) row.push(rnd.frac() < 0.05 ? TT.grassFlower : TT.grass[rnd.between(0, 1)]);
       g.push(row);
     }
-    // path from the door down through the gate
-    for (let r = houseR0 + HOUSE_H; r <= fenceR0 + 1; r++) g[r][cx] = TT.path[0];
-    // fence
-    for (let c = fenceC0; c <= fenceC1; c++) { g[fenceR0][c] = TT.fence.t; g[fenceR1][c] = TT.fence.b; }
-    for (let r = fenceR0; r <= fenceR1; r++) { g[r][fenceC0] = TT.fence.l; g[r][fenceC1] = TT.fence.r; }
-    g[fenceR0][fenceC0] = TT.fence.tl; g[fenceR0][fenceC1] = TT.fence.tr; g[fenceR1][fenceC0] = TT.fence.bl; g[fenceR1][fenceC1] = TT.fence.br;
-    g[fenceR0][cx] = TT.path[0]; g[fenceR0][cx - 1] = TT.fence.post; g[fenceR0][cx + 1] = TT.fence.post; // gate
-    // house: roof rows then wall rows
-    for (let i = 0; i < HOUSE_W; i++) {
-      g[houseR0][houseC0 + i] = i === 0 ? TT.roof.l : i === HOUSE_W - 1 ? TT.roof.r : TT.roof.m;
-      g[houseR0 + 1][houseC0 + i] = i === 0 ? TT.roof.l2 : i === HOUSE_W - 1 ? TT.roof.r2 : TT.roof.m2;
-      g[houseR0 + 2][houseC0 + i] = i === 0 ? TT.wall.l : i === HOUSE_W - 1 ? TT.wall.r : i === 1 || i === HOUSE_W - 2 ? TT.wall.window : TT.wall.m;
-      g[houseR0 + 3][houseC0 + i] = i === 0 ? TT.wall.l : i === HOUSE_W - 1 ? TT.wall.r : houseC0 + i === cx ? TT.wall.door : TT.wall.m;
-    }
-    g[houseR0][houseC0 + 1] = TT.chimney;
+    for (let r = HOUSE_ROWS - 1; r <= this.gr0 + 1; r++) g[r][cx] = TT.path[0];
     layerFrom(this, 'tinytown_img', g, this.ox, this.oy, -10);
-    this.add.rectangle(0, 0, worldW, worldH, 0x1e2f1a).setOrigin(0).setDepth(-20);
-    this.doorX = this.ox + (cx + 0.5) * T; this.doorY = this.oy + (houseR0 + HOUSE_H) * T;
-
-    // ---- colliders ----
-    const walls = this.physics.add.staticGroup();
-    const solid = (c1: number, r1: number, c2: number, r2: number) => solidRect(this, walls, this.ox + c1 * T, this.oy + r1 * T, (c2 - c1) * T, (r2 - r1) * T);
-    solid(houseC0, houseR0, cx, houseR0 + HOUSE_H - 0.15); solid(cx + 1, houseR0, houseC0 + HOUSE_W, houseR0 + HOUSE_H - 0.15); solid(houseC0, houseR0, houseC0 + HOUSE_W, houseR0 + HOUSE_H - 1);
-    solid(fenceC0, fenceR0 + 0.3, cx - 0.9, fenceR0 + 0.8); solid(cx + 1.9, fenceR0 + 0.3, fenceC1 + 1, fenceR0 + 0.8);
-    solid(fenceC0, fenceR1 + 0.3, fenceC1 + 1, fenceR1 + 0.8);
-    solid(fenceC0 + 0.3, fenceR0, fenceC0 + 0.7, fenceR1 + 1); solid(fenceC1 + 0.3, fenceR0, fenceC1 + 0.7, fenceR1 + 1);
-
-    // ---- props in the margin (deterministic per owner) ----
-    const prop = (frame: number, c: number, r: number, solidW = 0) => {
-      const im = tile(this, 'tinytown', frame, this.ox + (c + 0.5) * T, this.oy + (r + 1) * T);
-      if (solidW) solidRect(this, walls, im.x - solidW / 2, im.y - 18, solidW, 18);
-      return im;
-    };
-    const taken = new Set<string>();
-    const free = (c: number, r: number) => !taken.has(`${c},${r}`) && !(r >= houseR0 - 1 && r <= houseR0 + HOUSE_H && c >= houseC0 - 1 && c <= houseC0 + HOUSE_W) && !(r >= fenceR0 - 1 && r <= fenceR1 + 1 && c >= fenceC0 - 1 && c <= fenceC1 + 1) && !(c === cx && r <= fenceR0);
-    for (let i = 0; i < this.cols * this.rows * 0.05; i++) {
-      const c = rnd.between(1, this.cols - 2), r = rnd.between(1, this.rows - 2);
-      if (!free(c, r)) continue;
-      taken.add(`${c},${r}`);
-      const k = rnd.frac();
-      if (k < 0.55) prop(TT.trees[rnd.between(0, TT.trees.length - 1)], c, r, 30); else if (k < 0.8) prop(TT.bush, c, r, 30); else if (k < 0.9) prop(TT.mushroom, c, r); else prop(TT.rock, c, r);
+    this.add.rectangle(0, 0, this.worldW, this.worldH, 0x1e2f1a).setOrigin(0).setDepth(-20);
+    for (let i = 0; i < this.cols * 2; i++) {
+      const c = rnd.between(0, this.cols - 1), r = rnd.between(0, this.rows - 1);
+      const inGarden = c >= this.gc0 && c < this.gc0 + this.n && r >= this.gr0 && r < this.gr0 + this.n;
+      if (!inGarden && r > 1) this.add.image(this.ox + (c + rnd.frac()) * T, this.oy + (r + rnd.frac()) * T, 'flower').setDepth(-9);
     }
-    prop(TT.crate, houseC0 - 1, houseR0 + HOUSE_H - 1, 40); prop(TT.barrel, houseC0 + HOUSE_W, houseR0 + HOUSE_H - 1, 40);
-    prop(TT.beehive, houseC0 + HOUSE_W + 1, houseR0 + HOUSE_H, 40); prop(TT.sign, cx + 2, fenceR0 - 1);
-    prop(TT.pot, cx - 2, houseR0 + HOUSE_H); prop(TT.hay, houseC0 - 2, houseR0 + HOUSE_H, 40);
-    for (let i = 0; i < 8; i++) { const c = rnd.between(fenceC0 + 1, fenceC1 - 1), r = rnd.between(this.gr0, fenceR1 - 1); if (rnd.frac() < 0.5) this.add.image(this.ox + (c + rnd.frac()) * T, this.oy + (r + rnd.frac()) * T, 'flower').setDepth(-9); }
+
+    // ---- house (the whole cottage; walk up into the door to go inside) ----
+    this.doorX = this.ox + (cx + 0.5) * T; this.doorY = this.oy + HOUSE_ROWS * T - 6;
+    const house = this.add.image(this.doorX, this.doorY, 'house_ext').setOrigin(0.5, 1);
+    house.setDepth(this.doorY - 70);
+    this.walls = this.physics.add.staticGroup();
+    const hx0 = house.x - house.displayWidth / 2 + 16, hx1 = house.x + house.displayWidth / 2 - 16, hy0 = house.y - house.displayHeight + 120, hy1 = house.y - 26;
+    solidRect(this, this.walls, hx0, hy0, this.doorX - 34 - hx0, hy1 - hy0);
+    solidRect(this, this.walls, this.doorX + 34, hy0, hx1 - this.doorX - 34, hy1 - hy0);
+    solidRect(this, this.walls, hx0, hy0, hx1 - hx0, hy1 - 80 - hy0);
+
+    // ---- garden contents ----
+    this.plotLayer = this.add.container(0, 0);
+    this.fenceLayer = this.add.container(0, 0);
+    this.grid = this.add.graphics().setDepth(4).setVisible(false);
+    this.grid.lineStyle(1, 0xf0ebcc, 0.35);
+    for (let i = 0; i <= this.n; i++) {
+      this.grid.lineBetween(this.ox + (this.gc0 + i) * T, this.oy + this.gr0 * T, this.ox + (this.gc0 + i) * T, this.oy + (this.gr0 + this.n) * T);
+      this.grid.lineBetween(this.ox + this.gc0 * T, this.oy + (this.gr0 + i) * T, this.ox + (this.gc0 + this.n) * T, this.oy + (this.gr0 + i) * T);
+    }
+    this.highlight = this.add.rectangle(0, 0, T, T).setStrokeStyle(3, 0xf0ebcc, 0.9).setFillStyle(0xffffff, 0.08).setDepth(5).setVisible(false);
+    this.drawFences();
+    this.drawPlots();
     this.applySeason(effectiveSeason(this.view.owner.season, new Date().getMonth()));
 
-    // ---- plots + player ----
-    this.plotLayer = this.add.container(0, 0);
-    this.highlight = this.add.rectangle(0, 0, T, T).setStrokeStyle(3, 0xf0ebcc, 0.9).setFillStyle(0xffffff, 0.08).setDepth(5).setVisible(false);
-    this.drawPlots();
-    const spawn = data.spawn === 'porch' ? [this.doorX, this.doorY + 40] : [this.doorX, this.oy + (this.gr0 + 0.8) * T];
+    // ---- player ----
+    const gateX = this.ox + (cx + 0.5) * T;
+    const spawn = data.spawn === 'porch' ? [this.doorX, this.doorY + 30] : [gateX, this.oy + (this.gr0 + 2.6) * T];
     this.player = new Player(this, spawn[0], spawn[1], me().user.character ?? 0, me().user.username, true);
     this.player.setCollideWorldBounds(true);
-    this.physics.add.collider(this.player, walls);
+    this.physics.add.collider(this.player, this.walls);
     this.cameras.main.startFollow(this.player, true, 0.12, 0.12);
     this.keys = makeKeys(this);
-    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !isPomodoroActive() && !typingInDom() && !this.chatEl) fn(); };
+    const guarded = (fn: () => void) => () => { if (!isPanelOpen() && !typingInDom() && !this.chatEl) fn(); };
     if (own) this.input.keyboard!.on('keydown-E', guarded(() => this.interact()));
     this.input.keyboard!.on('keydown-F', guarded(() => { this.player.emote('wave'); this.net?.emote('wave'); }));
     this.input.keyboard!.on('keydown-ENTER', guarded(() => this.openChat()));
+    this.input.keyboard!.on('keydown-ESC', () => { if (this.edit && !isPanelOpen()) this.setEdit(false); });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { if (own && this.edit && !isPanelOpen()) this.editClick(p); });
+    this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.pointerMoved(p));
     this.events.once('shutdown', () => this.teardown());
     this.connect(own);
-    if (own) gardenHud(this.n);
-    setHint(own ? 'E on a tile: dig / plant / feed · Enter chat · F wave · Shift run · walk into the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door = go home`);
+    setNavMode('garden');
+    if (own) gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
+    setHint(own ? 'E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run · walk up to the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door = go home`);
     this.ready = true;
   }
 
   onMe() {
     if (!this.ready || this.ownerId !== me().user.id) return;
-    if (gardenTiles(level().level) !== this.n) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; } // levelled up: the fence moves out
+    if (gardenTiles(level().level) !== this.n) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; } // levelled up: the garden grows
     const nextSeason = effectiveSeason(me().user.season, new Date().getMonth());
     if (nextSeason !== this.shownSeason) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; }
-    this.view.plots = me().plots; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen; this.view.owner.season = me().user.season;
-    this.drawPlots(); gardenHud(this.n);
+    this.view.plots = me().plots; this.view.fences = me().fences; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen; this.view.owner.season = me().user.season; this.view.owner.fence_color = me().user.fence_color; this.view.owner.growth = me().user.growth;
+    this.drawFences(); this.drawPlots(); gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
+    this.pendingRefresh = false;
   }
 
+  // ---------- tiles ----------
   private tileAt(x: number, y: number): [number, number] | null {
-    const tx = Math.floor((x - this.ox) / T) - this.gc0, ty = Math.floor((y - 6 - this.oy) / T) - this.gr0;
+    const tx = Math.floor((x - this.ox) / T) - this.gc0, ty = Math.floor((y - this.oy) / T) - this.gr0;
     return tx >= 0 && ty >= 0 && tx < this.n && ty < this.n ? [tx, ty] : null;
   }
+  private tilePx(tx: number, ty: number) { return { x: this.ox + (this.gc0 + tx) * T, y: this.oy + (this.gr0 + ty) * T }; }
+  private plotAt(tx: number, ty: number) { return this.view.plots.find((p) => p.tx === tx && p.ty === ty) ?? null; }
+  private fenceAt(tx: number, ty: number) { return this.view.fences.find((f) => f.tx === tx && f.ty === ty) ?? null; }
   private interact() {
-    const t = this.tileAt(this.player.x, this.player.y);
+    if (isPomodoroActive()) return;
+    const t = this.tileAt(this.player.x, this.player.y - 6);
     if (!t) return;
-    const plot = this.view.plots.find((p) => p.tx === t[0] && p.ty === t[1]);
-    plotDialog(t[0], t[1], plot ?? null);
+    if (this.fenceAt(t[0], t[1])) { toast('There is a fence here. Use Edit to move it.'); return; }
+    plotDialog(t[0], t[1], this.plotAt(t[0], t[1]));
   }
 
-  /** Tilled tiles, crop sprites by stage (mature = the plant's own art), wither tint, growth timers, frozen overlay. */
+  // ---------- fences (autotiled from the four neighbours) ----------
+  private drawFences() {
+    this.fenceLayer.removeAll(true); this.fenceBodies.forEach((b) => b.destroy()); this.fenceBodies = []; this.gates = [];
+    const has = (tx: number, ty: number) => !!this.fenceAt(tx, ty);
+    const color = this.view.owner.fence_color || 'brown';
+    for (const f of this.view.fences) {
+      const n = has(f.tx, f.ty - 1), e = has(f.tx + 1, f.ty), s = has(f.tx, f.ty + 1), w = has(f.tx - 1, f.ty);
+      const { x, y } = this.tilePx(f.tx, f.ty);
+      const bx = x + T / 2, by = y + T - 2;
+      if (f.kind === 'gate') {
+        const vertical = !e && !w && (n || s);
+        const img = this.add.image(bx, by, `fence_gate_${color}`).setOrigin(0.5, 1).setDepth(by);
+        if (vertical) { img.setAngle(90).setOrigin(0.5, 0.5).setPosition(bx, y + T / 2); }
+        this.fenceLayer.add(img); this.gates.push({ tx: f.tx, ty: f.ty, img, open: false, vertical });
+        continue;
+      }
+      let piece: string = fencePiece(n, e, s, w);
+      if (piece === 'h_m' && (f.tx + f.ty) % 3 === 0) piece = 'h_m2';
+      if (piece === 'v_m' && (f.tx + f.ty) % 3 === 0) piece = 'v_m2';
+      this.fenceLayer.add(this.add.image(bx, by, `fence_${piece}_${color}`).setOrigin(0.5, 1).setDepth(by));
+      this.fenceBodies.push(solidRect(this, this.walls, x + 4, y + T * 0.45, T - 8, T * 0.5));
+    }
+  }
+  private updateGates() {
+    for (const g of this.gates) {
+      const { x, y } = this.tilePx(g.tx, g.ty);
+      const near = Math.abs(this.player.x - (x + T / 2)) < T * 1.1 && Math.abs(this.player.y - (y + T / 2)) < T * 1.1;
+      if (near !== g.open) { g.open = near; g.img.setTexture(`fence_${near ? 'gate_open' : 'gate'}_${this.view.owner.fence_color || 'brown'}`); }
+    }
+  }
+
+  // ---------- plots + plants ----------
   drawPlots() {
-    this.plotLayer.removeAll(true); this.timerTexts = [];
+    this.plotLayer.removeAll(true); this.plantBodies.forEach((b) => b.destroy()); this.plantBodies = [];
     const wither = this.view.owner.wither / WITHER_MAX;
     const tint = Phaser.Display.Color.Interpolate.ColorWithColor(new Phaser.Display.Color(255, 255, 255), new Phaser.Display.Color(120, 115, 105), 1, wither);
     const tintHex = Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b);
+    const now = Date.now();
     for (const p of this.view.plots) {
-      const x = this.ox + (this.gc0 + p.tx) * T, y = this.oy + (this.gr0 + p.ty) * T;
-      this.plotLayer.add(this.add.image(x, y, 'tinytown', TT.dirt).setOrigin(0).setScale(4).setDepth(-5));
+      const { x, y } = this.tilePx(p.tx, p.ty);
+      this.plotLayer.add(this.add.image(x, y, 'soil').setOrigin(0).setDepth(-5));
       if (!p.plant_id) continue;
-      const plant = plantById(p.plant_id)!;
-      const cx = x + T / 2, by = y + T - 4;
-      const im = this.add.image(cx, by, `plant_${plant.sprite}`).setOrigin(0.5, 1).setScale([0.34, 0.54, 0.76, 1][Math.min(3, p.stage)]);
-      im.setDepth(by).setTint(tintHex).setAlpha(1 - wither * 0.3);
+      const plant = plantById(p.plant_id)!, stage = plantStage(p, now);
+      if (stage === 0) continue; // seed: bare soil for the first seconds
+      const cx = x + T / 2, by = y + T * 0.72;   // the stem grows out of the middle of the soil
+      const key = stage === 1 ? 'twig' : plantSprite(plant);
+      const tex = this.textures.get(key).getSourceImage() as HTMLImageElement;
+      const targetH = stage === 1 ? PLANT_H.twig : PLANT_H[plant.kind] * (stage === 2 ? 0.55 : 1);
+      const im = this.add.image(cx, by, key).setOrigin(0.5, 1).setScale(targetH / tex.height).setDepth(by).setTint(tintHex).setAlpha(1 - wither * 0.3);
+      im.setInteractive({ pixelPerfect: false });
+      im.on('pointerover', () => { this.hoverPlot = p; });
+      im.on('pointerout', () => { if (this.hoverPlot === p) this.hoverPlot = null; });
       this.plotLayer.add(im);
-      if (p.ready_at) {
-        const t = this.add.text(cx, y - 2, '', { fontFamily: 'VT323', fontSize: '18px', color: '#F0EBCC', backgroundColor: '#103523', padding: { x: 5, y: 1 } }).setOrigin(0.5, 1).setDepth(1000);
-        (t as any).readyAt = p.ready_at; this.timerTexts.push(t); this.plotLayer.add(t);
-      }
+      if (plant.kind === 'tree' && stage >= 2) this.plantBodies.push(solidRect(this, this.walls, cx - 16, by - 14, 32, 14));
     }
+    if (this.hoverPlot && !this.view.plots.includes(this.hoverPlot)) this.hoverPlot = this.view.plots.find((q) => q.id === this.hoverPlot!.id) ?? null;
     this.freeze?.destroy(); this.freeze = undefined;
     if (this.view.owner.frozen) {
       const gx = this.ox + this.gc0 * T, gy = this.oy + this.gr0 * T, s = this.n * T;
@@ -184,18 +222,113 @@ export class GardenScene extends Phaser.Scene {
       this.freeze = this.add.container(0, 0, [r, t]);
     }
   }
+  /** Hover tooltip: name, stage, time left and the harvest reward. Follows the pointer. */
+  private updateTip(pointer: Phaser.Input.Pointer) {
+    const p = this.hoverPlot;
+    if (!p || !p.plant_id || this.edit) { this.tipEl?.remove(); this.tipEl = undefined; return; }
+    if (!this.tipEl) { this.tipEl = document.createElement('div'); this.tipEl.id = 'tip'; document.getElementById('overlay')!.appendChild(this.tipEl); }
+    const plant = plantById(p.plant_id)!, now = Date.now(), stage = plantStage(p, now), r = plantReward(plant, this.view.owner.growth);
+    const names = ['Seed', 'Twig', 'Young', 'Fully grown'];
+    const left = p.ready_at && stage < STAGES ? p.ready_at - now : 0;
+    const mmss = (ms: number) => { const s = Math.max(0, Math.ceil(ms / 1000)); return s >= 3600 ? `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m` : `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`; };
+    this.tipEl.innerHTML = `<b>${plant.name}</b> · ${names[stage]}<br/>${stage < STAGES ? `Fully grown in <span class="num">${mmss(left)}</span><br/>+<span class="num">${r.xp}</span> XP · +<span class="num">${r.coins}</span> coins when grown` : 'Fully grown'}`;
+    const canvas = this.game.canvas.getBoundingClientRect(), sx = canvas.width / W;
+    this.tipEl.style.left = `${canvas.left + pointer.x * sx + 16}px`; this.tipEl.style.top = `${canvas.top + pointer.y * sx - 10}px`;
+  }
 
-  /** A light screen tint is the full season effect. It does not add or replace art assets. */
+  // ---------- edit mode ----------
+  private setEdit(on: boolean) {
+    this.edit = on ? { tool: 'fence', moving: null } : null;
+    this.grid.setVisible(on); this.highlight.setVisible(false);
+    if (on) editPalette({ tool: 'fence', color: this.view.owner.fence_color, onTool: (t) => { if (this.edit) { this.edit.tool = t; this.edit.moving = null; } }, onColor: async (c) => { try { await api.post('/api/me/fence-color', { color: c }); await refreshMe(); } catch (e) { toast((e as Error).message, 'err'); } }, onDone: () => this.setEdit(false) });
+    else hideEditPalette();
+    setHint(on ? 'Edit: click tiles to place fences / gates, hoe plots, erase, or move plants · Esc when done' : null);
+  }
+  private pointerMoved(p: Phaser.Input.Pointer) {
+    if (this.edit) {
+      const t = this.tileAt(p.worldX, p.worldY);
+      this.highlight.setVisible(!!t);
+      if (t) { const { x, y } = this.tilePx(t[0], t[1]); this.highlight.setPosition(x + T / 2, y + T / 2); }
+    }
+    this.updateTip(p);
+  }
+  private async editClick(p: Phaser.Input.Pointer) {
+    const t = this.tileAt(p.worldX, p.worldY);
+    if (!t || !this.edit) return;
+    const [tx, ty] = t, plot = this.plotAt(tx, ty), fence = this.fenceAt(tx, ty), tool = this.edit.tool;
+    const run = async (fn: () => Promise<unknown>) => { try { await fn(); await refreshMe(); } catch (e) { toast((e as Error).message, 'err'); } };
+    if (tool === 'fence' || tool === 'gate') {
+      if (fence?.kind === tool) return run(() => api.post('/api/garden/fence', { tx, ty, kind: null }));
+      if (plot) return toast('There is a plot here', 'err');
+      return run(() => api.post('/api/garden/fence', { tx, ty, kind: tool }));
+    }
+    if (tool === 'hoe') {
+      if (fence) return toast('Remove the fence first', 'err');
+      if (plot) return plotDialog(tx, ty, plot);
+      return run(() => api.post('/api/plots/hoe', { tx, ty }));
+    }
+    if (tool === 'erase') {
+      if (fence) return run(() => api.post('/api/garden/fence', { tx, ty, kind: null }));
+      if (plot) {
+        if (plot.plant_id && !(await confirmDialog('Grassify this plot?', `The ${plantById(plot.plant_id)!.name} growing here will be lost.`, 'Grassify', 'Keep'))) return;
+        return run(() => api.post(`/api/plots/${plot.id}/remove`));
+      }
+      return;
+    }
+    if (tool === 'move') {
+      if (this.edit.moving === null) {
+        if (!plot) return toast('Click a plot to pick it up');
+        this.edit.moving = plot.id; toast(`Picked up ${plot.plant_id ? plantById(plot.plant_id)!.name : 'the plot'} - click where it should go`);
+        return;
+      }
+      const id = this.edit.moving; this.edit.moving = null;
+      if (plot || fence) return toast('That tile is taken', 'err');
+      return run(() => api.post(`/api/plots/${id}/move`, { tx, ty }));
+    }
+  }
+
+  // ---------- snapshot ----------
+  /** Zoom the camera out to the whole garden for one frame, grab that part of the canvas, restore. */
+  private snapshot() {
+    const cam = this.cameras.main, zoom = Math.min(W / this.worldW, H / this.worldH);
+    const hidden = this.children.list.filter((o) => /^(season|weather)-/.test(o.name)) as unknown as Phaser.GameObjects.Components.Visible[];
+    hidden.forEach((o) => o.setVisible(false)); this.highlight.setVisible(false);
+    cam.stopFollow(); cam.removeBounds(); cam.setZoom(zoom); cam.centerOn(this.worldW / 2, this.worldH / 2);
+    this.game.renderer.snapshot((img) => {
+      cam.setZoom(1); cam.setBounds(0, 0, this.worldW, this.worldH); cam.startFollow(this.player, true, 0.12, 0.12);
+      hidden.forEach((o) => o.setVisible(true));
+      const im = img as HTMLImageElement, scale = im.width / W;
+      const sw = Math.round(this.worldW * zoom * scale), sh = Math.round(this.worldH * zoom * scale);
+      const c = document.createElement('canvas'); c.width = sw; c.height = sh;
+      c.getContext('2d')!.drawImage(im, Math.round((im.width - sw) / 2), Math.round((im.height - sh) / 2), sw, sh, 0, 0, sw, sh);
+      const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = `ikigai-garden-${new Date().toISOString().slice(0, 10)}.png`; a.click();
+      toast('Snapshot saved', 'reward');
+    });
+  }
+
+  // ---------- seasons ----------
+  /** A light tint plus falling particles: rain, snow or leaves. */
   private applySeason(season: GardenSeason) {
     this.shownSeason = season;
     if (season === 'summer') return;
-    const style = {
-      rainy: { color: 0x365f83, alpha: 0.12 },
-      fall: { color: 0xa83d2f, alpha: 0.14 },
-      winter: { color: 0xdce3e5, alpha: 0.18 },
-    }[season];
+    const style = { rainy: { color: 0x365f83, alpha: 0.12 }, fall: { color: 0xa83d2f, alpha: 0.12 }, winter: { color: 0xdce3e5, alpha: 0.16 } }[season];
     const overlay = this.add.rectangle(W / 2, H / 2, W, H, style.color, style.alpha).setScrollFactor(0).setDepth(1_000_000).setAlpha(0).setName(`season-${season}`);
     this.tweens.add({ targets: overlay, alpha: 1, duration: 300 });
+    const key = `p_${season}`;
+    if (!this.textures.exists(key)) {
+      const g = this.make.graphics({ x: 0, y: 0 }, false);
+      if (season === 'rainy') g.fillStyle(0xcfe6ff, 0.9).fillRect(0, 0, 2, 14);
+      else if (season === 'winter') g.fillStyle(0xffffff, 1).fillCircle(4, 4, 4);
+      else g.fillStyle(0xd9663a, 1).fillRect(0, 0, 9, 6);
+      g.generateTexture(key, season === 'rainy' ? 2 : 9, season === 'rainy' ? 14 : 8); g.destroy();
+    }
+    const cfg = season === 'rainy'
+      ? { speedY: { min: 520, max: 720 }, speedX: { min: -60, max: -30 }, lifespan: 1800, frequency: 18, quantity: 3, scale: 1, rotate: 0 }
+      : season === 'winter'
+        ? { speedY: { min: 35, max: 80 }, speedX: { min: -25, max: 25 }, lifespan: 12000, frequency: 90, quantity: 1, scale: { min: 0.5, max: 1 }, rotate: 0 }
+        : { speedY: { min: 50, max: 110 }, speedX: { min: -40, max: 40 }, lifespan: 9000, frequency: 160, quantity: 1, scale: { min: 0.7, max: 1.1 }, rotate: { min: 0, max: 360 } };
+    const em = this.add.particles(0, 0, key, { x: { min: -60, max: W + 60 }, y: -20, alpha: { start: 0.95, end: 0.5 }, ...cfg });
+    em.setScrollFactor(0).setDepth(999_999).setName(`weather-${season}`);
   }
 
   // ---------- realtime ----------
@@ -216,7 +349,7 @@ export class GardenScene extends Phaser.Scene {
   }
   private addPeer(p: PeerState) {
     if (p.id === me().user.id || this.peers.has(p.id)) return;
-    const pl = new Player(this, p.x || this.doorX, p.y || this.oy + (this.gr0 + 1) * T, p.character, p.name, false);
+    const pl = new Player(this, p.x || this.doorX, p.y || this.oy + (this.gr0 + 2.6) * T, p.character, p.name, false);
     pl.body!.enable = false;
     (pl as any).target = { x: p.x || pl.x, y: p.y || pl.y };
     pl.setFacing(p.dir as Dir, p.moving);
@@ -243,32 +376,36 @@ export class GardenScene extends Phaser.Scene {
     this.net?.close(); this.net = undefined;
     this.peers.forEach((p) => p.destroy()); this.peers.clear();
     this.chatEl?.remove(); this.chatEl = undefined;
-    waitingOverlay(null); hideGardenHud();
+    this.tipEl?.remove(); this.tipEl = undefined; this.hoverPlot = null;
+    waitingOverlay(null); hideGardenHud(); hideEditPalette(); setNavMode('house');
   }
 
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting || !this.player.body) return;
-    const focusLocked = this.ownerId === me().user.id && isPomodoroActive();
-    const [vx, vy, run] = isPanelOpen() || focusLocked || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
+    const [vx, vy, run] = isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
     this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving);
     for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
+    this.updateGates();
     const now = Date.now();
-    for (const t of this.timerTexts) { const ms = (t as any).readyAt - now; t.setText(ms <= 0 ? 'ready!' : fmt(ms)); if (ms <= 0 && !(t as any).refreshed) { (t as any).refreshed = true; refreshMe().catch(() => {}); } }
-    const own = this.ownerId === me().user.id;
-    const tileHere = own && !focusLocked ? this.tileAt(this.player.x, this.player.y) : null;
-    this.highlight.setVisible(!!tileHere);
-    if (tileHere) this.highlight.setPosition(this.ox + (this.gc0 + tileHere[0] + 0.5) * T, this.oy + (this.gr0 + tileHere[1] + 0.5) * T);
-    if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY + 14 && this.player.dir === 'up') {
+    if (!this.pendingRefresh && this.view.plots.some((p) => p.plant_id && p.ready_at && p.stage < STAGES && (now >= p.ready_at || (now - p.planted_at! < 12_000 && now - p.planted_at! > 10_000)))) {
+      // a seed just sprouted or a plant just matured: redraw (maturing also settles the reward on the server)
+      this.pendingRefresh = true;
+      if (this.ownerId === me().user.id) refreshMe().catch(() => { this.pendingRefresh = false; });
+      else { this.drawPlots(); setTimeout(() => { this.pendingRefresh = false; }, 2000); }
+    }
+    if (!this.edit) {
+      const own = this.ownerId === me().user.id;
+      const tileHere = own ? this.tileAt(this.player.x, this.player.y - 6) : null;
+      this.highlight.setVisible(!!tileHere);
+      if (tileHere) { const { x, y } = this.tilePx(tileHere[0], tileHere[1]); this.highlight.setPosition(x + T / 2, y + T / 2); }
+    }
+    if (this.tipEl) this.updateTip(this.input.activePointer);
+    if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir === 'up') {
       this.exiting = true;
       this.cameras.main.fadeOut(250, 11, 15, 10);
       this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'door' }));
     }
   }
 }
-export function fmt(ms: number) {
-  const m = Math.ceil(ms / 60000);
-  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`;
-}
-export type { Plot };
-export { TILE };
+export type { Plot, FenceTile };

@@ -4,10 +4,12 @@ import { sfx } from '../ui/audio';
 export type Dir = 'up' | 'down' | 'left' | 'right';
 export const WALK = 230, RUN = 380;
 export const FRAME = { w: 96, h: 140 };
+export const CHARACTERS = 20;
 
 /**
- * A gardener sprite. Each direction has two idle frames and two walk frames. Left uses the mirrored right side.
- * All animation is frame based (no scale/position tweens) so pixels stay crisp and physics owns x/y.
+ * A gardener sprite. Sheets are the untouched team art: front, side (facing right) and the four back-walk frames.
+ * Idle = frame + a 1px breath; walking = the frame stepping up 2px (back uses two real walk frames).
+ * Diagonal input shows the side view. All animation is frame based so physics owns x/y and pixels stay crisp.
  */
 export class Player extends Phaser.Physics.Arcade.Sprite {
   dir: Dir = 'down';
@@ -34,7 +36,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     const speed = run ? RUN : WALK;
     if (vx || vy) this.body!.velocity.normalize().scale(speed);
     const moving = !!(vx || vy);
-    if (moving) this.dir = Math.abs(vx) > Math.abs(vy) ? (vx < 0 ? 'left' : 'right') : vy < 0 ? 'up' : 'down';
+    if (moving) this.dir = vx ? (vx < 0 ? 'left' : 'right') : vy < 0 ? 'up' : 'down';
     this.setFacing(this.dir, moving, run);
     if (moving && this.isLocal) { this.stepTimer += dt; if (this.stepTimer > (run ? 180 : 280)) { this.stepTimer = 0; sfx.step(); } }
   }
@@ -44,7 +46,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     this.setFlipX(dir === 'left');
     const view = dir === 'left' || dir === 'right' ? 'side' : dir;
     const key = `${moving ? 'walk' : 'idle'}_${view}_${this.character}`;
-    this.play({ key, frameRate: moving ? (running ? 11 : 7) : 2 }, true);
+    this.play({ key, frameRate: moving ? (running ? 10 : 6) : 2 }, true);
   }
   preUpdate(t: number, dt: number) {
     super.preUpdate(t, dt);
