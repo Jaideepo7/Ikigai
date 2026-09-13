@@ -95,6 +95,7 @@ export class GardenScene extends Phaser.Scene {
     solidRect(this, this.walls, hx0, hy0, this.doorX - 34 - hx0, hy1 - hy0);
     solidRect(this, this.walls, this.doorX + 34, hy0, hx1 - this.doorX - 34, hy1 - hy0);
     solidRect(this, this.walls, hx0, hy0, hx1 - hx0, hy1 - 80 - hy0);
+    this.drawDecorTrees();
 
     // ---- garden contents ----
     this.plotLayer = this.add.container(0, 0);
@@ -141,6 +142,35 @@ export class GardenScene extends Phaser.Scene {
     this.view.plots = me().plots; this.view.fences = me().fences; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen; this.view.owner.season = me().user.season; this.view.owner.fence_color = me().user.fence_color; this.view.owner.growth = me().user.growth;
     this.drawFences(); this.drawPlots(); gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
     this.pendingRefresh = false;
+  }
+
+  /** Permanent scenery in the outer grass; a separate seed keeps it stable across redraws. */
+  private drawDecorTrees() {
+    const rnd = new Phaser.Math.RandomDataGenerator([`decor-trees-${this.ownerId}`]);
+    const gx = this.ox + this.gc0 * T, gy = this.oy + this.gr0 * T, size = this.n * T;
+    const keys = ['decor_tree_emerald', 'decor_tree_lime'];
+    let variant = rnd.between(0, 1);
+    const addTree = (x: number, y: number, height: number) => {
+      const tree = this.add.image(Math.round(x), Math.round(y), keys[variant++ % keys.length])
+        .setOrigin(0.5, 1).setName('garden-decor-tree');
+      tree.setScale(Math.min(height / tree.height, (MARGIN * T - 48) / tree.width));
+      tree.setFlipX(rnd.frac() < 0.5).setDepth(tree.y);
+      // Only the trunk blocks walking; the canopy sorts above players behind it.
+      solidRect(this, this.walls, tree.x - 14, tree.y - 20, 28, 20);
+    };
+    // Three loosely spaced trees on each side, with a clear strip beside the fences.
+    for (const side of [-1, 1]) {
+      for (let i = 0; i < 3; i++) {
+        const x = side < 0 ? gx - MARGIN * T / 2 - 8 : gx + size + MARGIN * T / 2 + 8;
+        const y = gy + ((i + rnd.realInRange(0.65, 0.85)) / 3) * size;
+        addTree(x + rnd.realInRange(-6, 6), y, rnd.between(180, 220));
+      }
+    }
+    // Two shorter trees at the far end; leave the middle approach open.
+    for (const fraction of [0.2, 0.8]) {
+      const height = rnd.between(144, 160);
+      addTree(gx + size * fraction + rnd.realInRange(-24, 24), gy + size + height + 16, height);
+    }
   }
 
   // ---------- tiles ----------

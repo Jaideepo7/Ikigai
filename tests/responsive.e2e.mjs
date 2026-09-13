@@ -40,6 +40,7 @@ async function checkLayout() {
 }
 
 try {
+  let decorPositions;
   await page.goto(process.env.BASE || 'http://127.0.0.1:5173');
   await page.waitForFunction(() => window.__game?.scene.getScene('House')?.player?.body);
   for (const [width, height] of [[1366, 768], [1280, 720], [1024, 600], [1536, 864], [1920, 1080], [2560, 1440], [3440, 1440], [900, 600]]) {
@@ -54,6 +55,21 @@ try {
     await page.evaluate(() => window.__game.scene.getScene('House').scene.start('Garden', { ownerId: 1, spawn: 'porch' }));
     await page.waitForFunction(() => window.__game.scene.getScene('Garden')?.player?.active);
     await checkLayout();
+    const decor = await page.evaluate(() => {
+      const scene = window.__game.scene.getScene('Garden');
+      const gx = scene.ox + scene.gc0 * 64, gy = scene.oy + scene.gr0 * 64, size = scene.n * 64;
+      return scene.children.list.filter((o) => o.name === 'garden-decor-tree').map((tree) => {
+        const b = tree.getBounds();
+        return { x: tree.x, y: tree.y, key: tree.texture.key,
+          outside: b.right <= gx || b.left >= gx + size || b.top >= gy + size,
+          insideWorld: b.left >= 0 && b.top >= 0 && b.right <= scene.worldW && b.bottom <= scene.worldH };
+      });
+    });
+    assert.equal(decor.length, 8, 'eight decorative trees');
+    assert.equal(new Set(decor.map((t) => t.key)).size, 2, 'both reference styles are present');
+    assert.ok(decor.every((t) => t.outside && t.insideWorld), 'trees stay outside plots and within world edges');
+    if (decorPositions) assert.deepEqual(decor, decorPositions, 'decor stays stable across visits and screen sizes');
+    decorPositions = decor;
     await page.evaluate(() => window.__game.scene.getScene('Garden').scene.start('House', {}));
     await page.waitForFunction(() => window.__game.scene.getScene('House')?.player?.active);
     console.log(`PASS ${width}x${height}: canvas, toolbar, settings, garden transition`);
