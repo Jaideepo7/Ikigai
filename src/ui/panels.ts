@@ -1,3 +1,4 @@
+import './shop.css';
 import { api } from '../api';
 import { me, level, refreshMe, toast, on, store } from '../state';
 import { goto, activeScene } from '../game';
@@ -6,7 +7,7 @@ import { sfx, music, setSfx, setVolume, setTrack, TRACKS } from './audio';
 import {
   DAILY_CAP, PLANTS, CARDS, plantById, plantSprite, plantStage, plantReward, growMs, previewReward, plotsUnlocked, STAGES, caseSlots, gardenTiles, MAX_LEVEL,
   GEM_PRICE_COINS, FREEZES_PER_MONTH, GROWTH_OPTIONS, spinBaseCoins, addDays, FENCE_COLORS,
-  FURNITURE, furnitureById, SEASONS, SEASON_CHANGE_GEMS, effectiveSeason, type Season, type Task, type Plot, type FriendRow, type Reel, type ShopInfo, type FenceColor, type Furniture,
+  FURNITURE, furnitureById, furnitureArea, SEASONS, SEASON_CHANGE_GEMS, effectiveSeason, type Season, type Task, type Plot, type FriendRow, type Reel, type ShopInfo, type FenceColor, type Furniture,
 } from '../shared/rules';
 
 /** Escape user-supplied text before it goes into innerHTML. */
@@ -23,8 +24,10 @@ const furnImg = (id: number, cls = '') => `<img class="furn-art ${cls}" src="/as
 
 // ---------- panel plumbing ----------
 let panelEl: HTMLElement | null = null;
+let shopTimer: ReturnType<typeof setInterval> | undefined;
+let shopRequest = 0;
 export function isPanelOpen() { return !!panelEl; }
-export function closePanel() { panelEl?.remove(); panelEl = null; stopFriendsPoll(); renderMini(); }
+export function closePanel() { clearInterval(shopTimer); shopTimer = undefined; shopRequest++; panelEl?.remove(); panelEl = null; stopFriendsPoll(); renderMini(); }
 export function openPanel(html: string, cls = ''): HTMLElement {
   closePanel();
   const back = document.createElement('div'); back.className = 'panel-back';
@@ -154,7 +157,7 @@ const dailyBar = () => { const d = me().daily; const pct = Math.min(100, Math.ro
 const NAV = [['pomodoro', 'P', 'Pomodoro'], ['tasks', 'T', 'Tasks'], ['map', 'M', 'Map'], ['inventory', 'I', 'Inventory'], ['shop', 'Q', 'Shop'], ['settings', 'Esc', 'Settings']] as const;
 const openers: Record<string, () => void> = { pomodoro: () => pomodoroPanel(), tasks: () => tasksPanel(), map: mapPanel, inventory: () => inventoryPanel(), shop: () => shopPanel(), settings: settingsPanel };
 let navMode: 'house' | 'garden' = 'house';
-const GARDEN_NAV = new Set(['map', 'settings']);
+const GARDEN_NAV = new Set(['map', 'inventory', 'shop', 'settings']);
 /** In the garden only Map and Settings stay on the bar (and their hotkeys). */
 export function setNavMode(mode: 'house' | 'garden') {
   navMode = mode;
@@ -505,7 +508,7 @@ export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' | 'seasons' 
     : tab === 'cards'
       ? `<div class="card-row">${m.cards.map((c) => cardHtml(CARDS[c.card_id], false, c.slot !== null ? `Case slot ${c.slot + 1}` : 'In storage')).join('') || '<div class="empty-state"><b>No cards yet.</b><span>A card shows up in the shop now and then.</span></div>'}</div><p class="sub" style="margin-top:10px">Put cards in the case by the bookcase in your home.</p>`
       : tab === 'furniture'
-        ? `<div class="furniture-inventory">${m.furniture.map((o) => { const f = furnitureById(o.furniture_id); if (!f) return ''; const placed = m.placed.filter((p) => p.furniture_id === f.id).length, free = o.qty - placed; return `<article class="furniture-item" data-furniture="${f.id}">${furnImg(f.id)}<div><b>${f.name}</b><small>Owned ×${o.qty} · ${placed} in the room · ${free} in storage · ${f.w}×${f.h} tiles</small></div>${free > 0 ? `<button class="btn sm sage" data-place="${f.id}" ${atHome ? '' : 'disabled title="Go home to place furniture"'}>Place</button>` : '<span class="owned-label">All placed</span>'}</article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to decorate your home.</span></div>'}</div><p class="sub" style="margin-top:10px">${atHome ? 'Click Place, then click a floor tile. Use Edit room to move pieces or put them back.' : 'Go home to place furniture.'}</p>`
+        ? `<div class="furniture-inventory">${m.furniture.map((o) => { const f = furnitureById(o.furniture_id); if (!f) return ''; const placed = m.placed.filter((p) => p.furniture_id === f.id).length, free = o.qty - placed; const area = furnitureArea(f.id), sc = activeScene() as { ownerId?: number; scene: { key: string } } | undefined; const canPlace = sc?.ownerId === m.user.id && sc.scene.key === (area === 'garden' ? 'Garden' : 'House'); return `<article class="furniture-item" data-furniture="${f.id}">${furnImg(f.id)}<div><b>${f.name}</b><small>Owned ×${o.qty} · ${placed} placed (${furnitureArea(f.id) === 'garden' ? 'Outdoor' : 'Indoor'}) · ${free} in storage · ${f.w}×${f.h} tiles</small></div>${free > 0 ? `<button class="btn sm sage" data-place="${f.id}" ${canPlace ? '' : `disabled title="Go to your ${area === 'garden' ? 'garden' : 'house'} to place this"`}>Place</button>` : '<span class="owned-label">All placed</span>'}</article>`; }).join('') || '<div class="empty-state"><b>No furniture yet.</b><span>Buy furniture in the shop to decorate your home.</span></div>'}</div><p class="sub" style="margin-top:10px">Place indoor furniture in your house and outdoor furniture in your garden. Use Edit to move pieces or return them to storage.</p>`
         : (() => { const available = SEASONS.filter((s) => s.value === 'auto' || m.seasons.includes(s.value)); const active = effectiveSeason(m.user.season, new Date().getMonth()); return `<div class="section-copy"><h3>Garden season</h3><p>Choose an owned season. Auto follows the real US season.</p></div><div class="season-grid">${available.map((s) => `<button data-inventory-season="${s.value}" class="season-card ${m.user.season === s.value ? 'on' : ''}"><span class="season-art ${s.value}">${{ auto: '🗓️', summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value]}</span><b>${s.label}</b><small>${s.note}</small><em>${m.user.season === s.value ? 'Selected' : 'Use season'}</em></button>`).join('')}</div><p class="season-now">Your garden now shows <b>${active}</b>.</p>`; })();
   const p = openPanel(`<div class="panel-head"><div><h2>🎒 Inventory</h2><p class="sub">Seeds, cards, furniture and seasons.</p></div></div>${dailyBar()}
     <div class="tabs"><button data-t="seeds" class="${tab === 'seeds' ? 'on' : ''}">🌱 Seeds (${seeds.reduce((s, x) => s + x.qty, 0)})</button><button data-t="cards" class="${tab === 'cards' ? 'on' : ''}">🃏 Cards (${m.cards.length})</button><button data-t="furniture" class="${tab === 'furniture' ? 'on' : ''}">🪑 Furniture (${m.furniture.reduce((s, x) => s + x.qty, 0)})</button><button data-t="seasons" class="${tab === 'seasons' ? 'on' : ''}">🍂 Seasons (${m.seasons.length + 1})</button></div>${body}`, 'wide');
@@ -521,33 +524,30 @@ export function cardHtml(c: { id: number; name: string; rarity: string }, locked
 }
 
 // ---------- shop ----------
-type ShopTab = 'shop' | 'plants' | 'cards';
-const untilMidnight = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), d.getDate() + 1).getTime() - d.getTime(); };
-const hhmm = (ms: number) => `${Math.floor(ms / 3600_000)}:${String(Math.floor((ms % 3600_000) / 60_000)).padStart(2, '0')}`;
-export async function shopPanel(tab: ShopTab = 'shop') {
+type ShopTab = 'shop' | 'indoor' | 'outdoor' | 'seasons' | 'plants' | 'cards';
+export async function shopPanel(tab: ShopTab = 'shop', source?: HTMLElement) {
+  const request = ++shopRequest;
   let info: ShopInfo;
-  try { info = await api.get<ShopInfo>('/api/shop'); } catch (e) { return err(e); }
+  try { info = await api.get<ShopInfo>('/api/shop'); } catch (e) { if (request === shopRequest) err(e); return; }
+  if (request !== shopRequest || (source && !source.isConnected)) return;
+  const receivedAt = performance.now();
   info.plants = info.plants.filter((id) => plantById(id));
   info.collected = info.collected.filter((id) => plantById(id));
   const m = me(), u = m.user, owned = new Set(info.ownedCards), collected = new Set(info.collected);
   const qty = (id: number) => m.inventory.find((i) => i.plant_id === id)?.qty ?? 0;
   const fqty = (id: number) => m.furniture.find((f) => f.furniture_id === id)?.qty ?? 0;
-  const reset = hhmm(untilMidnight());
-  const head = `<header class="shop-head"><div><h2>Welcome to the shop!</h2><p>Use your coins to get plants and furniture. Gems collect rare cards for your home.</p></div>
-    <div class="shop-currency"><span data-currency="coin">${ico('coin')}<b class="num">${u.is_admin ? '∞' : u.coins.toLocaleString()}</b><small>coins</small></span><span data-currency="gem">${ico('gem')}<b class="num">${u.is_admin ? '∞' : u.gems.toLocaleString()}</b><small>gems</small></span><button class="btn sm" id="buygem" title="Buy 1 gem">+1 ${ico('gem', 'sm')} for ${num(GEM_PRICE_COINS)}</button></div></header>`;
+  const head = `<header class="market-head"><div><h2>Shop</h2><p>A little something for your home and garden.</p></div><div class="market-wallet"><span>${ico('coin')} ${num(u.is_admin ? 'Unlimited' : u.coins.toLocaleString())}</span><span>${ico('gem')} ${num(u.is_admin ? 'Unlimited' : u.gems.toLocaleString())}</span><button class="btn sm" id="buygem">+1 ${ico('gem', 'sm')} for ${num(GEM_PRICE_COINS)}</button></div></header>
+    <div class="market-nav"><div class="tabs">${([['shop', 'Flowers'], ['indoor', 'Indoor'], ['outdoor', 'Outdoor'], ['seasons', 'Seasons']] as const).map(([key, label]) => `<button data-t="${key}" class="${tab === key ? 'on' : ''}">${label}</button>`).join('')}</div><span class="market-reset">New stock in <b class="num" data-shop-countdown>--:--:--</b></span></div>`;
   let body = '';
-  if (tab === 'shop') {
-    const plantCard = (id: number) => { const pl = plantById(id)!, n = qty(id); return `<article class="shop-item plant"><b>${pl.name}</b>${plantImg(pl.id, 'seed-art')}${n ? `<span class="owned-badge">Owned ×${n}</span>` : ''}<button class="btn sm sage" data-buy="${pl.id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</button></article>`; };
-    const furnCard = (id: number) => { const f = furnitureById(id)!, n = fqty(id); return `<article class="shop-item furn"><b>${f.name}</b><span class="rar common">${f.w}×${f.h} tiles</span><div class="furn-box">${furnImg(f.id)}</div>${n ? `<span class="owned-badge">Owned ×${n}</span>` : ''}<button class="btn sm sage" data-furniture-buy="${f.id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : f.price)}</button></article>`; };
+  if (tab !== 'plants' && tab !== 'cards') {
+    const plantCard = (id: number) => { const pl = plantById(id)!; return `<article class="market-product"><b>${pl.name}</b><div class="market-art">${plantImg(id, 'seed-art')}</div><small>${qty(id) ? `Owned ?${qty(id)}` : 'Flower seed'}</small><button class="btn sm sage" data-buy="${id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : pl.price)}</button></article>`; };
+    const furnCard = (id: number) => { const f = furnitureById(id)!; return `<article class="market-product" data-area="${furnitureArea(id)}"><b>${f.name}</b><div class="market-art">${furnImg(id)}</div><small>${f.w}?${f.h} tiles${fqty(id) ? ` ? Owned ?${fqty(id)}` : ''}</small><button class="btn sm sage" data-furniture-buy="${id}">${ico('coin', 'sm')} ${num(u.is_admin ? 'FREE' : f.price)}</button></article>`; };
     const card = info.card !== null ? CARDS[info.card] : null;
-    body = `<div class="shop-main">
-      <div class="shop-col">
-        <section><div class="sec-head"><h3>🌱 Plants</h3><span class="reset">Reset: <b class="num">${reset}</b></span><button class="link" data-t="plants">View All →</button></div><div class="shop-grid">${info.plants.map(plantCard).join('')}</div></section>
-        <section><div class="sec-head"><h3>🃏 Cards</h3><span class="reset">Reset: <b class="num">${reset}</b></span><button class="link" data-t="cards">View Collection →</button></div>
-          ${card ? `<div class="card-offer">${cardHtml(card, false)}<div><b>${card.name}</b><p>A rare visitor. Cards are the most precious thing in the shop - one at most, and not every day.</p>${owned.has(card.id) ? '<span class="sold">Sold</span>' : `<button class="btn rose" data-card="${card.id}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : card.price)} gems</button>`}</div></div>` : '<div class="empty-state small"><b>No card in stock today.</b><span>Cards are rare - check back tomorrow.</span></div>'}</section>
-        <section><div class="sec-head"><h3>🪑 Furniture</h3><span class="reset">Reset: <b class="num">${reset}</b></span></div><div class="shop-grid">${info.furniture.map(furnCard).join('')}</div></section>
-        <section><div class="sec-head"><h3>🍂 Seasons</h3><span class="reset">${num(SEASON_CHANGE_GEMS)} gem each · pick them in your inventory</span></div><div class="season-grid four">${SEASONS.filter((s) => s.value !== 'auto').map((s) => { const has = m.seasons.includes(s.value); return `<article class="season-card ${has ? 'on' : ''}"><span class="season-art ${s.value}">${{ summer: '☀️', rainy: '🌧️', fall: '🍂', winter: '❄️' }[s.value as 'summer']}</span><b>${s.label}</b><small>${s.note}</small>${has ? '<em>Owned</em>' : `<button class="btn sm sage" data-season-buy="${s.value}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : SEASON_CHANGE_GEMS)}</button>`}</article>`; }).join('')}</div></section>
-      </div>
+    const title = { shop: 'Flowers for your garden', indoor: 'Make yourself at home', outdoor: 'A place to enjoy the outdoors', seasons: 'Set the scene' }[tab];
+    const note = { shop: 'Plant a seed and watch it bloom.', indoor: 'Four new indoor finds every day. Place them inside your house.', outdoor: 'Four new outdoor finds every day. Place them in your garden.', seasons: 'Buy a season once, then select it in your inventory.' }[tab];
+    const products = tab === 'shop' ? info.plants.map(plantCard).join('') : tab === 'seasons' ? SEASONS.filter(s => s.value !== 'auto').map(s => `<article class="market-product market-season"><span class="season-art ${s.value}">${{ summer: '?', rainy: '?', fall: '??', winter: '?' }[s.value as 'summer']}</span><b>${s.label}</b><p>${s.note}</p>${m.seasons.includes(s.value) ? '<span class="owned-label">Owned</span>' : `<button class="btn sm sage" data-season-buy="${s.value}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : SEASON_CHANGE_GEMS)}</button>`}</article>`).join('') : (tab === 'outdoor' ? info.outdoor ?? [] : info.furniture).map(furnCard).join('');
+    body = `<section class="market-stock"><div class="market-section-head"><div><h3>${title}</h3><p>${note}</p></div>${tab === 'shop' ? '<button class="link" data-t="plants">Flower collection ?</button>' : ''}</div><div class="market-products">${products}</div></section>
+      <div class="market-extras"><section class="market-feature"><div class="market-section-head"><h3>Rare finds</h3><button class="link" data-t="cards">Collection ?</button></div>${card ? `<div class="market-card">${cardHtml(card, false)}<div><b>${card.name}</b><p>A little treasure for your card case.</p>${owned.has(card.id) ? '<span class="owned-label">Collected</span>' : `<button class="btn sm rose" data-card="${card.id}">${ico('gem', 'sm')} ${num(u.is_admin ? 'FREE' : card.price)} gems</button>`}</div></div>` : '<div class="market-no-card"><span>?</span><b>No rare card today</b><p>Check back when the shop refreshes.</p></div>'}</section>
       <aside class="spin-box"><h3>🎰 Daily Spin</h3><p>Spin once a day for coins and rare gems. Every spin pays at least <b>${num(spinBaseCoins(u.streak))} coins</b>.</p>
         <div class="machine v3"><img class="mach" src="/assets/ui/spin_machine.png" alt="" /><div class="reels"><div class="reel">${ico('coin', 'lg')}</div><div class="reel">🌱</div><div class="reel">${ico('gem', 'lg')}</div></div>
           <button class="spin-btn" id="spin" ${info.daily.spun && !u.is_admin ? 'disabled' : ''}>${info.daily.spun && !u.is_admin ? 'Come back tomorrow' : 'Spin'}</button><button class="lever3" id="lever" aria-label="Pull the lever" ${info.daily.spun && !u.is_admin ? 'disabled' : ''}></button></div>
@@ -559,13 +559,32 @@ export async function shopPanel(tab: ShopTab = 'shop') {
   }
   const p = openPanel(`<div class="shop-shell">${head}${body}</div>`, 'xwide shop-panel');
   name('shop');
+  // The server supplies both timestamps so a wrong device clock cannot shift the reset.
+  const duration = info.resetAt - info.serverNow;
+  let refreshing = false, retryAt = 0;
+  const tick = () => {
+    if (!p.isConnected) return;
+    const remaining = Math.max(0, Math.ceil((duration - (performance.now() - receivedAt)) / 1000));
+    const label = p.querySelector<HTMLElement>('[data-shop-countdown]')!;
+    if (!Number.isFinite(remaining)) { label.textContent = 'Reopen to update'; return; }
+    label.textContent = remaining > 0 ? `${Math.floor(remaining / 3600)}:${String(Math.floor(remaining % 3600 / 60)).padStart(2, '0')}:${String(remaining % 60).padStart(2, '0')}` : 'Refreshing?';
+    if (remaining === 0) {
+      p.querySelectorAll<HTMLButtonElement>('[data-buy], [data-furniture-buy], [data-card]').forEach(b => b.disabled = true);
+      if (!refreshing && performance.now() >= retryAt) {
+        refreshing = true;
+        void shopPanel(tab, p).finally(() => { refreshing = false; retryAt = performance.now() + 5000; });
+      }
+    }
+  };
+  shopTimer = setInterval(tick, 250); tick();
+
   p.querySelectorAll<HTMLElement>('[data-t]').forEach((b) => b.addEventListener('click', () => shopPanel(b.dataset.t as ShopTab)));
-  const act = async (fn: () => Promise<unknown>, after: () => void) => { try { await fn(); await refreshMe(); after(); } catch (e) { err(e); } };
-  p.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/seed', { plant_id: Number(b.dataset.buy) }), () => { sfx.coin(); toast(`Bought a ${plantById(Number(b.dataset.buy))!.name} seed`); shopPanel(); })));
-  p.querySelectorAll<HTMLElement>('[data-card]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/card', { card_id: Number(b.dataset.card) }), () => { sfx.chime(); toast(`${CARDS[Number(b.dataset.card)].name} added to your collection!`, 'reward'); shopPanel(); })));
-  p.querySelectorAll<HTMLElement>('[data-furniture-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/furniture', { furniture_id: Number(b.dataset.furnitureBuy) }), () => { sfx.coin(); toast(`${furnitureById(Number(b.dataset.furnitureBuy))!.name} added to your inventory`, 'reward'); shopPanel(); })));
-  p.querySelector('#buygem')?.addEventListener('click', () => act(() => api.post('/api/shop/gems', { qty: 1 }), () => { sfx.coin(); shopPanel(tab); }));
-  p.querySelectorAll<HTMLElement>('[data-season-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/season', { season: b.dataset.seasonBuy }), () => { sfx.chime(); toast('Season added to your inventory', 'reward'); shopPanel(); })));
+  const act = async (fn: () => Promise<unknown>, after: () => void) => { try { await fn(); await refreshMe(); if (p.isConnected) after(); } catch (e) { err(e); } };
+  p.querySelectorAll<HTMLElement>('[data-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/seed', { plant_id: Number(b.dataset.buy) }), () => { sfx.coin(); toast(`Bought a ${plantById(Number(b.dataset.buy))!.name} seed`); shopPanel(tab, p); })));
+  p.querySelectorAll<HTMLElement>('[data-card]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/card', { card_id: Number(b.dataset.card) }), () => { sfx.chime(); toast(`${CARDS[Number(b.dataset.card)].name} added to your collection!`, 'reward'); shopPanel(tab, p); })));
+  p.querySelectorAll<HTMLElement>('[data-furniture-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/furniture', { furniture_id: Number(b.dataset.furnitureBuy) }), () => { sfx.coin(); toast(`${furnitureById(Number(b.dataset.furnitureBuy))!.name} added to your inventory`, 'reward'); shopPanel(tab, p); })));
+  p.querySelector('#buygem')?.addEventListener('click', () => act(() => api.post('/api/shop/gems', { qty: 1 }), () => { sfx.coin(); shopPanel(tab, p); }));
+  p.querySelectorAll<HTMLElement>('[data-season-buy]').forEach((b) => b.addEventListener('click', () => act(() => api.post('/api/shop/season', { season: b.dataset.seasonBuy }), () => { sfx.chime(); toast('Season added to your inventory', 'reward'); shopPanel(tab, p); })));
   const spin = async () => {
     const btn = p.querySelector<HTMLButtonElement>('#spin')!, lever = p.querySelector<HTMLButtonElement>('#lever')!, reels = [...p.querySelectorAll<HTMLElement>('.reel')];
     if (btn.disabled) return;
@@ -576,7 +595,7 @@ export async function shopPanel(tab: ShopTab = 'shop') {
       reels.forEach((el) => el.classList.add('spinning'));
       const spinner = setInterval(() => { reels.forEach((el) => { if (el.classList.contains('spinning')) el.innerHTML = [icon.coin, '🌱', icon.gem][Math.floor(Math.random() * 3)]; }); sfx.spin(); }, 90);
       r.reels.forEach((sym, i) => setTimeout(() => { reels[i].classList.remove('spinning'); reels[i].innerHTML = icon[sym]; }, 900 + i * 500));
-      setTimeout(async () => { clearInterval(spinner); sfx.coin(); toast(`+${r.coins} coins${r.gems ? ` · +${r.gems} gems!` : ''}`, 'reward'); await refreshMe(); if (panelEl?.dataset.name === 'shop') shopPanel(); }, 2200);
+      setTimeout(async () => { clearInterval(spinner); sfx.coin(); toast(`+${r.coins} coins${r.gems ? ` · +${r.gems} gems!` : ''}`, 'reward'); await refreshMe(); if (p.isConnected) shopPanel(tab, p); }, 2200);
     } catch (e) { err(e); btn.disabled = false; lever.disabled = false; lever.classList.remove('pulled'); }
   };
   p.querySelector('#spin')?.addEventListener('click', spin);

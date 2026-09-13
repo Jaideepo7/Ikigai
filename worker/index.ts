@@ -3,8 +3,8 @@ import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import {
   START, DAILY_CAP, PLANTS, CARDS, FURNITURE, GEM_PRICE_COINS, REEL_WEIGHTS, STAGES, MAX_LEVEL,
   WITHER_MAX, FREEZES_PER_MONTH, GROWTH_OPTIONS, growMs, plantReward, taskReward, levelFromXp, xpForLevel, gardenTiles, plotsUnlocked, caseSlots, spinPayout, dayKey, addDays, daysBetween, weightedPick,
-  SEASON_CHANGE_GEMS, SEASONS, FENCE_COLORS, defaultFences, STARTER_FURNITURE, furnitureById, furnitureFits, shopRotation,
-  type Reel, type Season, type FenceColor, type PlacedFurniture,
+  SEASON_CHANGE_GEMS, SEASONS, FENCE_COLORS, defaultFences, STARTER_FURNITURE, furnitureById, furnitureFits, furnitureArea, gardenFurnitureFits, shopRotation, shopResetAt,
+  type Reel, type Season, type FenceColor, type PlacedFurniture, type Plot, type FenceTile,
 } from '../src/shared/rules';
 import { parseSyllabusWithGemini } from './syllabus';
 
@@ -119,7 +119,7 @@ async function meResponse(db: D1Database, u: UserRow, today: string) {
     db.prepare('SELECT plant_id,qty FROM inventory WHERE user_id=?').bind(u.id).all(),
     db.prepare('SELECT card_id,slot FROM cards WHERE user_id=?').bind(u.id).all(),
     db.prepare('SELECT furniture_id,qty FROM furniture_owned WHERE user_id=? AND qty>0').bind(u.id).all(),
-    db.prepare('SELECT id,furniture_id,cx,cy,locked FROM furniture_placed WHERE user_id=?').bind(u.id).all(),
+    db.prepare('SELECT id,furniture_id,cx,cy,locked,location FROM furniture_placed WHERE user_id=?').bind(u.id).all(),
     db.prepare('SELECT name FROM task_folders WHERE user_id=? ORDER BY name').bind(u.id).all<{ name: string }>(),
     db.prepare('SELECT season FROM owned_seasons WHERE user_id=? ORDER BY season').bind(u.id).all<{ season: Season }>(),
     db.prepare('SELECT key,value FROM stats WHERE user_id=?').bind(u.id).all<{ key: string; value: number }>(),
@@ -371,17 +371,24 @@ app.get('/api/garden/:id', async (c) => {
   if (id !== me.id && !(await c.env.DB.prepare("SELECT 1 FROM friends WHERE user_id=? AND friend_id=? AND status='accepted'").bind(me.id, id).first())) return bad('Not friends', 403);
   await ensureInit(c.env.DB, owner);
   await settlePlots(c.env.DB, id, owner.growth, Date.now());
-  const [plots, fences] = await Promise.all([
+  const [plots, fences, furniture] = await Promise.all([
     c.env.DB.prepare('SELECT id,tx,ty,plant_id,stage,planted_at,ready_at FROM plots WHERE user_id=? ORDER BY id').bind(id).all(),
     c.env.DB.prepare('SELECT tx,ty,kind FROM fences WHERE user_id=?').bind(id).all(),
+    placedRows(c.env.DB, id).then(rows => rows.filter(p => p.location === 'garden')),
   ]);
-  return c.json({ owner: { id: owner.id, username: owner.username, character: owner.character, level: userLevel(owner), wither: owner.wither, frozen: owner.frozen, season: owner.season, fence_color: owner.fence_color, growth: owner.growth }, plots: plots.results, fences: fences.results });
+  return c.json({ owner: { id: owner.id, username: owner.username, character: owner.character, level: userLevel(owner), wither: owner.wither, frozen: owner.frozen, season: owner.season, fence_color: owner.fence_color, growth: owner.growth }, plots: plots.results, fences: fences.results, furniture });
 });
 const inGarden = (u: UserRow, tx: unknown, ty: unknown) => { const n = gardenTiles(userLevel(u)); return Number.isInteger(tx) && Number.isInteger(ty) && (tx as number) >= 0 && (ty as number) >= 0 && (tx as number) < n && (ty as number) < n; };
 async function tileFree(db: D1Database, userId: number, tx: number, ty: number) {
   const p = await db.prepare('SELECT 1 FROM plots WHERE user_id=? AND tx=? AND ty=?').bind(userId, tx, ty).first();
   const f = await db.prepare('SELECT 1 FROM fences WHERE user_id=? AND tx=? AND ty=?').bind(userId, tx, ty).first();
-  return !p && !f;
+  return !p && !f && !(await furnitureOnTile(db, userId, tx, ty));
+}
+async function furnitureOnTile(db: D1Database, userId: number, tx: number, ty: number) {
+  return (await placedRows(db, userId)).some(p => {
+    const f = furnitureById(p.furniture_id);
+    return p.location === 'garden' && f && tx >= p.cx && tx < p.cx + f.w && ty >= p.cy && ty < p.cy + f.h;
+  });
 }
 /** Hoe a tile into a plot. Free; the number of plots is limited by level. */
 app.post('/api/plots/hoe', async (c) => {
@@ -436,17 +443,19 @@ app.post('/api/garden/fence', async (c) => {
   if (kind !== null && kind !== 'fence' && kind !== 'gate') return bad('Bad piece');
   if (kind === null) { await db.prepare('DELETE FROM fences WHERE user_id=? AND tx=? AND ty=?').bind(u.id, tx, ty).run(); return c.json({ ok: true }); }
   if (await db.prepare('SELECT 1 FROM plots WHERE user_id=? AND tx=? AND ty=?').bind(u.id, tx, ty).first()) return bad('There is a plot here');
+  if (await furnitureOnTile(db, u.id, tx, ty)) return bad('There is furniture here');
   await db.prepare('INSERT INTO fences (user_id,tx,ty,kind) VALUES (?,?,?,?) ON CONFLICT(user_id,tx,ty) DO UPDATE SET kind=excluded.kind').bind(u.id, tx, ty, kind).run();
   return c.json({ ok: true });
 });
 
 // ---------- shop ----------
 app.get('/api/shop', async (c) => {
-  const u = c.get('user'), day = c.get('today');
+  const serverNow = Date.now();
+  const u = c.get('user'), day = dayKey(serverNow, tz(c));
   const rot = shopRotation(u.id, day);
   const collected = (await c.env.DB.prepare('SELECT plant_id FROM inventory WHERE user_id=?').bind(u.id).all<{ plant_id: number }>()).results.map((r) => r.plant_id);
   const ownedCards = (await c.env.DB.prepare('SELECT card_id FROM cards WHERE user_id=?').bind(u.id).all<{ card_id: number }>()).results.map((r) => r.card_id);
-  return c.json({ ...rot, ownedCards, collected, day, daily: await getDaily(c.env.DB, u.id, day) });
+  return c.json({ ...rot, ownedCards, collected, day, serverNow, resetAt: shopResetAt(serverNow, tz(c)), daily: await getDaily(c.env.DB, u.id, day) });
 });
 async function addSeed(db: D1Database, userId: number, plantId: number, qty = 1) {
   await db.prepare('INSERT INTO inventory (user_id,plant_id,qty) VALUES (?,?,?) ON CONFLICT(user_id,plant_id) DO UPDATE SET qty=qty+excluded.qty').bind(userId, plantId, qty).run();
@@ -516,7 +525,8 @@ app.post('/api/shop/furniture', async (c) => {
   const id = Number((await c.req.json().catch(() => ({}))).furniture_id);
   const item = furnitureById(id);
   if (!item) return bad('No such furniture');
-  if (!u.is_admin && !shopRotation(u.id, c.get('today')).furniture.includes(id)) return bad('Not in the shop today');
+  const stock = shopRotation(u.id, c.get('today'));
+  if (!u.is_admin && ![...stock.furniture, ...stock.outdoor].includes(id)) return bad('Not in the shop today');
   if (!u.is_admin && u.coins < item.price) return bad(`Need ${item.price} coins`);
   await db.batch([
     db.prepare('UPDATE users SET coins=coins-? WHERE id=?').bind(u.is_admin ? 0 : item.price, u.id),
@@ -539,14 +549,21 @@ app.post('/api/shop/season', async (c) => {
 });
 
 // ---------- furniture helpers + visiting a friend's room ----------
-const placedRows = (db: D1Database, userId: number) => db.prepare('SELECT id,furniture_id,cx,cy,locked FROM furniture_placed WHERE user_id=?').bind(userId).all<PlacedFurniture>().then((r) => r.results);
+const placedRows = (db: D1Database, userId: number) => db.prepare('SELECT id,furniture_id,cx,cy,locked,location FROM furniture_placed WHERE user_id=?').bind(userId).all<PlacedFurniture>().then((r) => r.results);
+async function canPlaceOutdoors(db: D1Database, u: UserRow, placed: PlacedFurniture[], item: typeof FURNITURE[number], cx: number, cy: number, ignoreId = -1) {
+  const [plots, fences] = await Promise.all([
+    db.prepare('SELECT tx,ty FROM plots WHERE user_id=?').bind(u.id).all<Plot>(),
+    db.prepare('SELECT tx,ty,kind FROM fences WHERE user_id=?').bind(u.id).all<FenceTile>(),
+  ]);
+  return gardenFurnitureFits(placed.filter(p => p.location === 'garden'), plots.results, fences.results, item, cx, cy, gardenTiles(userLevel(u)), ignoreId);
+}
 app.get('/api/house/:id', async (c) => {
   const me = c.get('user'), id = Number(c.req.param('id'));
   const owner = await c.env.DB.prepare('SELECT * FROM users WHERE id=?').bind(id).first<UserRow>();
   if (!owner) return bad('No such home', 404);
   if (id !== me.id && !(await c.env.DB.prepare("SELECT 1 FROM friends WHERE user_id=? AND friend_id=? AND status='accepted'").bind(me.id, id).first())) return bad('Not friends', 403);
   await ensureInit(c.env.DB, owner);
-  const placed = await placedRows(c.env.DB, id);
+  const placed = (await placedRows(c.env.DB, id)).filter(p => p.location !== 'garden');
   return c.json({ owner: { id: owner.id, username: owner.username, character: owner.character }, placed });
 });
 
@@ -559,8 +576,11 @@ app.post('/api/furniture/place', async (c) => {
   const placed = await placedRows(db, u.id);
   const owned = (await db.prepare('SELECT qty FROM furniture_owned WHERE user_id=? AND furniture_id=?').bind(u.id, item.id).first<{ qty: number }>())?.qty ?? 0;
   if (placed.filter((p) => p.furniture_id === item.id).length >= owned) return bad('None left in your inventory');
-  if (!furnitureFits(placed, item, cx, cy)) return bad('It does not fit there (keep one tile free around furniture)');
-  const r = await db.prepare('INSERT INTO furniture_placed (user_id,furniture_id,cx,cy) VALUES (?,?,?,?)').bind(u.id, item.id, cx, cy).run();
+  const location = furnitureArea(item.id);
+  if (location === 'garden' && u.frozen) return bad('Unfreeze your garden before placing furniture');
+  const fits = location === 'garden' ? await canPlaceOutdoors(db, u, placed, item, cx, cy) : furnitureFits(placed.filter(p => p.location !== 'garden'), item, cx, cy);
+  if (!fits) return bad('It does not fit there; keep paths and occupied tiles clear');
+  const r = await db.prepare('INSERT INTO furniture_placed (user_id,furniture_id,cx,cy,location) VALUES (?,?,?,?,?)').bind(u.id, item.id, cx, cy, location).run();
   return c.json({ ok: true, id: r.meta.last_row_id });
 });
 app.post('/api/furniture/:id/move', async (c) => {
@@ -570,7 +590,10 @@ app.post('/api/furniture/:id/move', async (c) => {
   const row = placed.find((p) => p.id === id);
   if (!row) return bad('Not placed', 404);
   const item = furnitureById(row.furniture_id)!;
-  if (!Number.isInteger(cx) || !Number.isInteger(cy) || !furnitureFits(placed, item, cx, cy, id)) return bad('It does not fit there (keep one tile free around furniture)');
+  if (!Number.isInteger(cx) || !Number.isInteger(cy)) return bad('Bad placement');
+  if (row.location === 'garden' && u.frozen) return bad('Unfreeze your garden before moving furniture');
+  const fits = row.location === 'garden' ? await canPlaceOutdoors(db, u, placed, item, cx, cy, id) : furnitureFits(placed.filter(p => p.location !== 'garden'), item, cx, cy, id);
+  if (!fits) return bad('It does not fit there; keep paths and occupied tiles clear');
   await db.prepare('UPDATE furniture_placed SET cx=?, cy=? WHERE id=?').bind(cx, cy, id).run();
   return c.json({ ok: true });
 });

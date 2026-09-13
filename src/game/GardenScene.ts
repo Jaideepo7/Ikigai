@@ -4,8 +4,8 @@ import { Net, type PeerState } from './net';
 import { attachDomain, detachDomain, domainPeer } from './domainNet';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
-import { isPanelOpen, isPomodoroActive, plotDialog, setHint, setVisitBadge, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
-import { gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
+import { furnitureMenu, isPanelOpen, isPomodoroActive, plotDialog, setHint, setVisitBadge, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
+import { furnitureById, furnitureArea, gardenFurnitureFits, type PlacedFurniture, gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
 import { T, W, H, TT, layerFrom, solidRect } from './tiles';
 
 const MARGIN = 3;          // grass tiles around the editable garden
@@ -49,6 +49,11 @@ export class GardenScene extends Phaser.Scene {
   private hoverPlot: Plot | null = null;
   private tipEl?: HTMLDivElement;
   private pendingRefresh = false;
+  private furnitureSprites: Phaser.GameObjects.Image[] = [];
+  private furnitureBodies: Phaser.GameObjects.GameObject[] = [];
+  private placing: { furniture_id: number; placedId: number | null } | null = null;
+  private ghost?: Phaser.GameObjects.Image;
+  private placingBusy = false;
   constructor() { super('Garden'); }
 
   async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
@@ -60,7 +65,7 @@ export class GardenScene extends Phaser.Scene {
     this.cameras.main.fadeIn(200, 11, 15, 10);
     const own = this.ownerId === me().user.id;
     this.view = own
-      ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences }
+      ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences, furniture: me().placed.filter(p => p.location === 'garden') }
       : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
     if (!this.view) { detachDomain(this.ownerId); return this.scene.start('House', { spawn: 'center', ownerId: me().user.id }); }
     this.view.plots = this.view.plots.filter((plot) => !plot.plant_id || plantById(plot.plant_id));
@@ -114,7 +119,7 @@ export class GardenScene extends Phaser.Scene {
     }
     this.highlight = this.add.rectangle(0, 0, T, T).setStrokeStyle(3, 0xf0ebcc, 0.9).setFillStyle(0xffffff, 0.08).setDepth(5).setVisible(false);
     this.drawFences();
-    this.drawPlots();
+    this.drawPlots(); this.drawOutdoorFurniture();
     this.applySeason(effectiveSeason(this.view.owner.season, new Date().getMonth()));
 
     // ---- player ----
@@ -129,8 +134,8 @@ export class GardenScene extends Phaser.Scene {
     if (own) this.input.keyboard!.on('keydown-E', guarded(() => this.interact()));
     this.input.keyboard!.on('keydown-F', guarded(() => { this.player.emote('wave'); this.net?.emote('wave'); }));
     this.input.keyboard!.on('keydown-ENTER', guarded(() => this.openChat()));
-    this.input.keyboard!.on('keydown-ESC', () => { if (this.edit && !isPanelOpen()) this.setEdit(false); });
-    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { if (own && this.edit && !isPanelOpen()) this.editClick(p); });
+    this.input.keyboard!.on('keydown-ESC', () => { if (!isPanelOpen()) { if (this.placing) this.stopPlacing(); else if (this.edit) this.setEdit(false); } });
+    this.input.on('pointerdown', (p: Phaser.Input.Pointer) => { if (own && !isPanelOpen()) { if (this.placing) void this.placeFurniture(p); else if (this.edit) this.editClick(p); } });
     this.input.on('pointermove', (p: Phaser.Input.Pointer) => this.pointerMoved(p));
     this.events.once('shutdown', () => this.teardown());
     this.connect(own);
@@ -148,7 +153,8 @@ export class GardenScene extends Phaser.Scene {
     const nextSeason = effectiveSeason(me().user.season, new Date().getMonth());
     if (nextSeason !== this.shownSeason) { this.scene.restart({ ownerId: this.ownerId, spawn: 'gate' }); return; }
     this.view.plots = me().plots; this.view.fences = me().fences; this.view.owner.wither = me().user.wither; this.view.owner.frozen = me().user.frozen; this.view.owner.season = me().user.season; this.view.owner.fence_color = me().user.fence_color; this.view.owner.growth = me().user.growth;
-    this.drawFences(); this.drawPlots(); gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
+    this.view.furniture = me().placed.filter(p => p.location === 'garden');
+    this.drawFences(); this.drawPlots(); this.drawOutdoorFurniture(); gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
     this.pendingRefresh = false;
   }
 
@@ -193,6 +199,7 @@ export class GardenScene extends Phaser.Scene {
     if (isPomodoroActive()) return;
     const t = this.tileAt(this.player.x, this.player.y - 6);
     if (!t) return;
+    if (this.placing || this.furnitureAt(t[0], t[1])) return;
     if (this.fenceAt(t[0], t[1])) { toast('There is a fence here. Use Edit to move it.'); return; }
     plotDialog(t[0], t[1], this.plotAt(t[0], t[1]));
   }
@@ -279,6 +286,7 @@ export class GardenScene extends Phaser.Scene {
 
   // ---------- edit mode ----------
   private setEdit(on: boolean) {
+    if (this.placing) this.stopPlacing();
     this.edit = on ? { tool: 'fence', moving: null } : null;
     this.grid.setVisible(on); this.highlight.setVisible(false);
     if (on) editPalette({ tool: 'fence', color: this.view.owner.fence_color, onTool: (t) => { if (this.edit) { this.edit.tool = t; this.edit.moving = null; } }, onColor: async (c) => { try { await api.post('/api/me/fence-color', { color: c }); await refreshMe(); } catch (e) { toast((e as Error).message, 'err'); } }, onDone: () => this.setEdit(false) });
@@ -286,6 +294,7 @@ export class GardenScene extends Phaser.Scene {
     setHint(on ? 'Edit: click tiles to place fences / gates, hoe plots, erase, or move plants · Esc when done' : null);
   }
   private pointerMoved(p: Phaser.Input.Pointer) {
+    if (this.placing) { this.moveFurnitureGhost(p); return; }
     if (this.edit) {
       const t = this.tileAt(p.worldX, p.worldY);
       this.highlight.setVisible(!!t);
@@ -296,6 +305,8 @@ export class GardenScene extends Phaser.Scene {
   private async editClick(p: Phaser.Input.Pointer) {
     const t = this.tileAt(p.worldX, p.worldY);
     if (!t || !this.edit) return;
+    const furniture = this.furnitureAt(t[0], t[1]);
+    if (furniture) { this.openFurnitureMenu(furniture, p); return; }
     const [tx, ty] = t, plot = this.plotAt(tx, ty), fence = this.fenceAt(tx, ty), tool = this.edit.tool;
     const run = async (fn: () => Promise<unknown>) => { try { await fn(); await refreshMe(); } catch (e) { toast((e as Error).message, 'err'); } };
     if (tool === 'fence' || tool === 'gate') {
@@ -326,6 +337,79 @@ export class GardenScene extends Phaser.Scene {
       if (plot || fence) return toast('That tile is taken', 'err');
       return run(() => api.post(`/api/plots/${id}/move`, { tx, ty }));
     }
+  }
+
+  // ---------- outdoor furniture ----------
+  private furnitureAt(tx: number, ty: number) {
+    return this.view.furniture?.find(p => { const f = furnitureById(p.furniture_id); return f && tx >= p.cx && tx < p.cx + f.w && ty >= p.cy && ty < p.cy + f.h; });
+  }
+  private furniturePosition(cx: number, cy: number, w: number, h: number) {
+    const p = this.tilePx(cx, cy); return { x: p.x + w * T / 2, y: p.y + h * T };
+  }
+  private sizeFurniture(im: Phaser.GameObjects.Image, id: number) {
+    const f = furnitureById(id)!;
+    im.setScale(Math.min(f.w * T / im.width, (f.h + 0.5) * T / im.height));
+  }
+  private drawOutdoorFurniture() {
+    this.furnitureSprites.forEach(s => s.destroy()); this.furnitureSprites = [];
+    this.furnitureBodies.forEach(b => b.destroy()); this.furnitureBodies = [];
+    for (const p of this.view.furniture ?? []) {
+      const f = furnitureById(p.furniture_id); if (!f) continue;
+      const { x, y } = this.furniturePosition(p.cx, p.cy, f.w, f.h);
+      const im = this.add.image(x, y, `f_${f.id}`).setOrigin(0.5, 1).setDepth(y).setName(`garden-furniture-${p.id}`);
+      this.sizeFurniture(im, f.id); this.furnitureSprites.push(im);
+      if (f.kind !== 'walk' && f.kind !== 'rug') this.furnitureBodies.push(solidRect(this, this.walls, x - im.displayWidth / 2 + 4, y - Math.min(im.displayHeight, f.h * T) + 4, im.displayWidth - 8, Math.min(im.displayHeight, f.h * T) - 8));
+      if (this.ownerId === me().user.id) {
+        im.setInteractive();
+        im.on('pointerdown', (ptr: Phaser.Input.Pointer, _x: number, _y: number, ev: Phaser.Types.Input.EventData) => {
+          if (this.edit && !this.placing && !isPanelOpen()) { ev.stopPropagation(); this.openFurnitureMenu(p, ptr); }
+        });
+      }
+    }
+  }
+  startPlacing(furniture_id: number, placedId: number | null = null) {
+    if (this.ownerId !== me().user.id || isPomodoroActive()) return;
+    if (this.view.owner.frozen) { toast('Unfreeze your garden before decorating.', 'err'); return; }
+    const f = furnitureById(furniture_id); if (!f || furnitureArea(furniture_id) !== 'garden') return;
+    this.setEdit(false); this.placing = { furniture_id, placedId };
+    this.ghost = this.add.image(0, 0, `f_${f.id}`).setOrigin(0.5, 1).setAlpha(0.7).setDepth(5000).setVisible(false);
+    this.sizeFurniture(this.ghost, f.id); this.grid.setVisible(true);
+    setHint(`Placing ${f.name}: click an empty garden tile. Esc to cancel.`);
+  }
+  private stopPlacing() {
+    this.placing = null; this.ghost?.destroy(); this.ghost = undefined;
+    this.grid.setVisible(!!this.edit); setHint(null);
+  }
+  private furnitureTarget(p: Phaser.Input.Pointer) {
+    const f = furnitureById(this.placing!.furniture_id)!;
+    return this.tileAt(p.worldX - (f.w - 1) * T / 2, p.worldY - (f.h - 1) * T / 2);
+  }
+  private furnitureFitsHere(cx: number, cy: number) {
+    return gardenFurnitureFits(this.view.furniture ?? [], this.view.plots, this.view.fences, furnitureById(this.placing!.furniture_id)!, cx, cy, this.n, this.placing!.placedId ?? -1);
+  }
+  private moveFurnitureGhost(p: Phaser.Input.Pointer) {
+    if (!this.ghost || !this.placing) return;
+    const t = this.furnitureTarget(p); this.ghost.setVisible(!!t); if (!t) return;
+    const f = furnitureById(this.placing.furniture_id)!, pos = this.furniturePosition(t[0], t[1], f.w, f.h);
+    this.ghost.setPosition(pos.x, pos.y).setTint(this.furnitureFitsHere(...t) ? 0xbcffbc : 0xff9a9a);
+  }
+  private async placeFurniture(p: Phaser.Input.Pointer) {
+    if (!this.placing || this.placingBusy) return;
+    const t = this.furnitureTarget(p);
+    if (!t || !this.furnitureFitsHere(...t)) { toast('Choose an empty tile away from the entrance, plots and fences.', 'err'); return; }
+    const selection = this.placing; this.placingBusy = true;
+    try {
+      if (selection.placedId !== null) await api.post(`/api/furniture/${selection.placedId}/move`, { cx: t[0], cy: t[1] });
+      else await api.post('/api/furniture/place', { furniture_id: selection.furniture_id, cx: t[0], cy: t[1] });
+      await refreshMe(); if (this.placing === selection) this.stopPlacing(); toast('Garden furniture placed', 'reward');
+    } catch (e) { toast((e as Error).message, 'err'); }
+    finally { this.placingBusy = false; }
+  }
+  private openFurnitureMenu(p: PlacedFurniture, ptr: Phaser.Input.Pointer) {
+    furnitureMenu(furnitureById(p.furniture_id)!.name, !!p.locked, ptr.x, ptr.y, {
+      move: () => this.startPlacing(p.furniture_id, p.id),
+      remove: async () => { try { await api.post(`/api/furniture/${p.id}/remove`); await refreshMe(); toast('Returned to your inventory'); } catch (e) { toast((e as Error).message, 'err'); } },
+    });
   }
 
   // ---------- snapshot ----------
@@ -444,6 +528,10 @@ export class GardenScene extends Phaser.Scene {
     this.peers.forEach((p) => p.destroy()); this.peers.clear();
     this.chatEl?.remove(); this.chatEl = undefined;
     this.tipEl?.remove(); this.tipEl = undefined; this.hoverPlot = null;
+    this.ghost?.destroy(); this.ghost = undefined; this.placing = null; this.placingBusy = false;
+    this.furnitureSprites.forEach(s => s.destroy()); this.furnitureSprites = [];
+    this.furnitureBodies.forEach(b => b.destroy()); this.furnitureBodies = [];
+    document.getElementById('fmenu')?.remove();
     hideGardenHud(); hideEditPalette(); setNavMode('house');
     this.net = undefined;
   }
@@ -462,7 +550,7 @@ export class GardenScene extends Phaser.Scene {
       if (this.ownerId === me().user.id) refreshMe().catch(() => { this.pendingRefresh = false; });
       else { this.drawPlots(); setTimeout(() => { this.pendingRefresh = false; }, 2000); }
     }
-    if (!this.edit) {
+    if (!this.edit && !this.placing) {
       const own = this.ownerId === me().user.id;
       const tileHere = own ? this.tileAt(this.player.x, this.player.y - 6) : null;
       this.highlight.setVisible(!!tileHere);

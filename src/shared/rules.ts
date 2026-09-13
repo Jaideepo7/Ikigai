@@ -166,10 +166,21 @@ export const FURNITURE: Furniture[] = [
   { id: 39, name: 'Snake Plant', price: 45, kind: 'solid', w: 1, h: 1 }, { id: 40, name: 'Flower Planter', price: 70, kind: 'solid', w: 1, h: 1 },
 ];
 export const furnitureById = (id: number) => FURNITURE.find((f) => f.id === id);
+export type FurnitureArea = 'house' | 'garden';
+const OUTDOOR_FURNITURE = new Set([21, 23, 24, 26, 27, 32, 38, 40]);
+export const furnitureArea = (id: number): FurnitureArea => OUTDOOR_FURNITURE.has(id) ? 'garden' : 'house';
 export const ROOM = { cols: 17, rows: 7 };
 /** Every home starts with a bed (sleep), a desk (task book) and a bookcase (card case); these stay in the room. */
 export const STARTER_FURNITURE = [{ id: 1, cx: 0, cy: 0 }, { id: 18, cx: 7, cy: 0 }, { id: 13, cx: 14, cy: 0 }];
-export interface PlacedFurniture { id: number; furniture_id: number; cx: number; cy: number; locked: number }
+export interface PlacedFurniture { id: number; furniture_id: number; cx: number; cy: number; locked: number; location?: FurnitureArea }
+export function gardenFurnitureFits(placed: PlacedFurniture[], plots: Pick<Plot, 'tx' | 'ty'>[], fences: FenceTile[], item: Furniture, cx: number, cy: number, n: number, ignoreId = -1): boolean {
+  if (!Number.isInteger(cx) || !Number.isInteger(cy) || cx < 0 || cy < 0 || cx + item.w > n || cy + item.h > n) return false;
+  // Keep the entrance and its approach open.
+  if (cx <= Math.floor(n / 2) && cx + item.w > Math.floor(n / 2) && cy < 3) return false;
+  const overlaps = (x: number, y: number, w: number, h: number) => cx < x + w && cx + item.w > x && cy < y + h && cy + item.h > y;
+  if ([...plots, ...fences].some(p => overlaps(p.tx, p.ty, 1, 1))) return false;
+  return !placed.some(p => { const f = furnitureById(p.furniture_id); return p.id !== ignoreId && f && overlaps(p.cx, p.cy, f.w, f.h); });
+}
 /** Placement rule: inside the room, no overlap, and one empty tile between pieces. Rugs ignore the gap and can sit under things. */
 export function furnitureFits(placed: PlacedFurniture[], item: Furniture, cx: number, cy: number, ignoreId = -1): boolean {
   if (cx < 0 || cy < 0 || cx + item.w > ROOM.cols || cy + item.h > ROOM.rows) return false;
@@ -192,13 +203,25 @@ function seeded(seed: string) {
 }
 export const SHOP_PLANTS = 4, SHOP_FURNITURE = 4, SHOP_CARD_CHANCE = 0.3;
 /** What the shop stocks for one user on one local day: a few seeds, a few furniture pieces and, rarely, one card. */
-export function shopRotation(userId: number, day: string): { plants: number[]; furniture: number[]; card: number | null } {
+export function shopRotation(userId: number, day: string): { plants: number[]; furniture: number[]; outdoor: number[]; card: number | null } {
   const rnd = seeded(`${userId}:${day}`);
   const pick = <T>(pool: T[], n: number) => { const p = [...pool], out: T[] = []; while (out.length < n && p.length) out.push(p.splice(Math.floor(rnd() * p.length), 1)[0]); return out; };
   const plants = [...pick(PLANTS.filter((p) => p.rarity === 'common'), 2), ...pick(PLANTS.filter((p) => p.rarity === 'uncommon'), 2)].map((p) => p.id);
-  const furniture = pick(FURNITURE, SHOP_FURNITURE).map((f) => f.id);
+  // A shuffled cycle guarantees fresh furniture each day, with no consecutive-day repeats.
+  const furnitureStock = (area: FurnitureArea) => {
+    const random = seeded(`furniture:${userId}:${area}`);
+    const pool = FURNITURE.filter(f => furnitureArea(f.id) === area).map(f => f.id);
+    for (let i = pool.length - 1; i > 0; i--) { const j = Math.floor(random() * (i + 1)); [pool[i], pool[j]] = [pool[j], pool[i]]; }
+    const dayIndex = Math.floor(Date.parse(`${day}T00:00:00Z`) / 86_400_000);
+    const start = ((dayIndex * SHOP_FURNITURE) % pool.length + pool.length) % pool.length;
+    return Array.from({ length: SHOP_FURNITURE }, (_, i) => pool[(start + i) % pool.length]);
+  };
+  const furniture = furnitureStock('house'), outdoor = furnitureStock('garden');
   const card = rnd() < SHOP_CARD_CHANCE ? CARDS[Math.floor(rnd() * CARDS.length)].id : null;
-  return { plants, furniture, card };
+  return { plants, furniture, outdoor, card };
+}
+export function shopResetAt(now: number, tzOffsetMin: number): number {
+  return Date.parse(`${addDays(dayKey(now, tzOffsetMin), 1)}T00:00:00Z`) + tzOffsetMin * 60_000;
 }
 
 // ---------- time ----------
@@ -236,7 +259,7 @@ export interface MeResponse {
   furniture: { furniture_id: number; qty: number }[]; placed: PlacedFurniture[];
   folders: string[]; seasons: Season[]; daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
 }
-export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number; season: Season; fence_color: FenceColor; growth: number }; plots: Plot[]; fences: FenceTile[] }
+export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number; season: Season; fence_color: FenceColor; growth: number }; plots: Plot[]; fences: FenceTile[]; furniture?: PlacedFurniture[] }
 export interface HouseView { owner: { id: number; username: string; character: number | null }; placed: PlacedFurniture[] }
 export interface FriendRow { id: number; username: string; character: number | null; status: 'accepted' | 'incoming' | 'outgoing'; online: boolean; location: string | null }
-export interface ShopInfo { plants: number[]; furniture: number[]; card: number | null; ownedCards: number[]; collected: number[]; day: string; daily: { spun: number } }
+export interface ShopInfo { plants: number[]; furniture: number[]; outdoor: number[]; card: number | null; ownedCards: number[]; collected: number[]; day: string; serverNow: number; resetAt: number; daily: { spun: number } }

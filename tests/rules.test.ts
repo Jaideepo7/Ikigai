@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   taskReward, levelFromXp, xpToNext, xpForLevel, timingMult, spinPayout, dayKey, daysBetween, addDays, gardenTiles, plotsUnlocked, weightedPick, effectiveSeason,
-  fencePiece, defaultFences, plantStage, growMs, plantReward, plantById, furnitureFits, shopRotation, FURNITURE, PLANTS, CARDS, STAGES, SPROUT_MS, furnitureById,
+  fencePiece, defaultFences, plantStage, growMs, plantReward, plantById, furnitureFits, shopRotation, FURNITURE, PLANTS, CARDS, STAGES, SPROUT_MS, furnitureById, furnitureArea, gardenFurnitureFits, shopResetAt,
 } from '../src/shared/rules.ts';
 
 test('reward scales with difficulty, time, timing, pomodoro', () => {
@@ -41,7 +41,7 @@ test('growth: seed -> twig after 10s -> young at half -> mature', () => {
 test('retired trees cannot be bought or planted and never appear in shop rotations', () => {
   for (let id = 21; id <= 32; id++) assert.equal(plantById(id), undefined);
   for (let day = 1; day <= 100; day++) {
-    const { plants } = shopRotation(day, `2026-09-${day}`);
+    const { plants } = shopRotation(day, addDays('2026-09-01', day - 1));
     assert.equal(plants.length, 4);
     assert.equal(new Set(plants).size, 4);
     assert.ok(plants.every((id) => plantById(id)?.kind === 'flower'));
@@ -78,7 +78,7 @@ test('shop rotation is stable per user + day and rarely stocks a card', () => {
   const a = shopRotation(7, '2026-09-12'), b = shopRotation(7, '2026-09-12'), c = shopRotation(8, '2026-09-12');
   assert.deepEqual(a, b); assert.notDeepEqual(a.plants, c.plants);
   assert.equal(a.plants.length, 4); assert.equal(new Set(a.plants).size, 4); assert.equal(a.furniture.length, 4);
-  let cards = 0; for (let d = 1; d <= 200; d++) if (shopRotation(1, `2026-01-${d}`).card !== null) cards++;
+  let cards = 0; for (let d = 1; d <= 200; d++) if (shopRotation(1, addDays('2026-01-01', d - 1)).card !== null) cards++;
   assert.ok(cards > 30 && cards < 90, `cards in 200 days: ${cards}`);
   assert.equal(CARDS.length, 4);
 });
@@ -102,4 +102,41 @@ test('automatic US seasons', () => {
   assert.equal(effectiveSeason('auto', 6), 'summer');
   assert.equal(effectiveSeason('auto', 9), 'fall');
   assert.equal(effectiveSeason('fall', 0), 'fall');
+});
+
+
+test('indoor and outdoor stock never overlap and all eight pieces change at reset', () => {
+  for (const user of [1, 7, 500]) {
+    for (let d = 0; d < 100; d++) {
+      const a = shopRotation(user, addDays('2026-12-01', d));
+      const b = shopRotation(user, addDays('2026-12-01', d + 1));
+      assert.equal(new Set([...a.furniture, ...a.outdoor]).size, 8);
+      assert.ok(a.furniture.every(id => furnitureArea(id) === 'house'));
+      assert.ok(a.outdoor.every(id => furnitureArea(id) === 'garden'));
+      assert.ok([...b.furniture, ...b.outdoor].every(id => ![...a.furniture, ...a.outdoor].includes(id)));
+      assert.deepEqual(a, shopRotation(user, addDays('2026-12-01', d)));
+    }
+  }
+});
+test('reset timestamp is exactly the next local day for both sides of UTC', () => {
+  const now = Date.UTC(2026, 11, 31, 23, 59, 59);
+  for (const tz of [-720, -330, 0, 300, 840]) {
+    const reset = shopResetAt(now, tz);
+    assert.ok(reset > now && reset <= now + 86400000);
+    assert.equal(dayKey(reset - 1, tz), dayKey(now, tz));
+    assert.equal(dayKey(reset, tz), addDays(dayKey(now, tz), 1));
+    assert.notDeepEqual(shopRotation(1, dayKey(reset, tz)).furniture, shopRotation(1, dayKey(now, tz)).furniture);
+  }
+});
+test('outdoor furniture respects garden bounds, entrance, plots, fences and other pieces', () => {
+  const bench = furnitureById(23)!;
+  const fits = (x: number, y: number) => gardenFurnitureFits([], [], [], bench, x, y, 12);
+  assert.equal(fits(3, 4), true);
+  assert.equal(fits(-1, 4), false); assert.equal(fits(11, 4), false);
+  assert.equal(fits(3.5, 4), false); assert.equal(fits(5, 1), false);
+  assert.equal(gardenFurnitureFits([], [{ tx: 4, ty: 4 }], [], bench, 3, 4, 12), false);
+  assert.equal(gardenFurnitureFits([], [], [{ tx: 4, ty: 4, kind: 'fence' }], bench, 3, 4, 12), false);
+  const placed = [{ id: 8, furniture_id: 23, cx: 3, cy: 4, locked: 0 }];
+  assert.equal(gardenFurnitureFits(placed, [], [], bench, 3, 4, 12), false);
+  assert.equal(gardenFurnitureFits(placed, [], [], bench, 3, 4, 12, 8), true);
 });

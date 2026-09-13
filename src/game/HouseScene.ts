@@ -4,7 +4,7 @@ import { me } from '../state';
 import { api } from '../api';
 import { refreshMe, toast } from '../state';
 import { friendsPanel, cardCasePanel, tasksPanel, sleepPanel, isPanelOpen, isPomodoroActive, setHint, setVisitBadge, houseHud, hideHouseHud, furnitureMenu, setNavMode, waitingOverlay } from '../ui/panels';
-import { ROOM, furnitureById, furnitureFits, type PlacedFurniture, type HouseView } from '../shared/rules';
+import { ROOM, furnitureById, furnitureArea, furnitureFits, type PlacedFurniture, type HouseView } from '../shared/rules';
 import { T, solidRect } from './tiles';
 import { goto, POMODORO_LOCK_MSG } from './index';
 import { Net, type PeerState } from './net';
@@ -244,7 +244,7 @@ export class HouseScene extends Phaser.Scene {
   onMe() { if (this.ready && this.ownerId === me().user.id) this.drawFurniture(); }
 
   // ---------- furniture ----------
-  private placedList() { return this.visitPlaced ?? me().placed; }
+  private placedList() { return (this.visitPlaced ?? me().placed).filter(p => p.location !== 'garden'); }
   private tileToPx(cx: number, cy: number, w: number, h: number) { return { x: ROOM_X0 + (cx + w / 2) * T, y: ROOM_Y0 + (cy + h) * T }; }
   private tileAt(x: number, y: number): [number, number] { return [Math.floor((x - ROOM_X0) / T), Math.floor((y - ROOM_Y0) / T)]; }
   private drawFurniture() {
@@ -292,6 +292,7 @@ export class HouseScene extends Phaser.Scene {
     if (this.ownerId !== me().user.id) return;
     this.stopPlacing();
     const f = furnitureById(furniture_id); if (!f) return;
+    if (placedId === null && furnitureArea(furniture_id) === 'garden') { toast('Place this piece in your garden.'); return; }
     this.placing = { furniture_id, placedId };
     this.ghost = this.add.image(0, 0, `f_${f.id}`).setOrigin(0.5, 1).setScale(FURNITURE_SCALE).setAlpha(0.7).setDepth(5000).setVisible(false);
     this.grid.setVisible(true);
@@ -305,7 +306,7 @@ export class HouseScene extends Phaser.Scene {
     if (!this.placing || !this.ghost) return;
     const f = furnitureById(this.placing.furniture_id)!;
     const [cx, cy] = this.tileAt(p.worldX - (f.w * T) / 2 + T / 2, p.worldY - (f.h * T) / 2 + T / 2);
-    const ok = furnitureFits(me().placed, f, cx, cy, this.placing.placedId ?? -1);
+    const ok = furnitureFits(this.placedList(), f, cx, cy, this.placing.placedId ?? -1);
     const { x, y } = this.tileToPx(cx, cy, f.w, f.h);
     this.ghost.setPosition(x, y).setVisible(true).setTint(ok ? 0xbcffbc : 0xff9a9a);
   }
@@ -313,7 +314,7 @@ export class HouseScene extends Phaser.Scene {
     if (!this.placing) return;
     const f = furnitureById(this.placing.furniture_id)!;
     const [cx, cy] = this.tileAt(p.worldX - (f.w * T) / 2 + T / 2, p.worldY - (f.h * T) / 2 + T / 2);
-    if (!furnitureFits(me().placed, f, cx, cy, this.placing.placedId ?? -1)) { toast('It does not fit there - keep one tile free around furniture', 'err'); return; }
+    if (!furnitureFits(this.placedList(), f, cx, cy, this.placing.placedId ?? -1)) { toast('It does not fit there - keep one tile free around furniture', 'err'); return; }
     try {
       if (this.placing.placedId !== null) await api.post(`/api/furniture/${this.placing.placedId}/move`, { cx, cy });
       else await api.post('/api/furniture/place', { furniture_id: f.id, cx, cy });

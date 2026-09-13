@@ -1,0 +1,51 @@
+/* Shop uses the same parchment, tabs and pixel buttons as the other menus. */
+.panel.shop-panel { width: min(1120px, calc(100vw - 32px)); padding: 24px; }
+.shop-panel .shop-shell { padding: 4px 12px 8px 0; overflow-y: auto; overflow-x: hidden; }
+.market-head { display: flex; align-items: center; justify-content: space-between; gap: 20px; padding-right: 38px; }
+.market-head h2 { margin: 0 0 4px; font-size: 32px; }
+.market-head p, .market-section-head p { margin: 0; color: #776145; font-size: 16px; }
+.market-wallet { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.market-wallet > span { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
+.market-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0; border-bottom: 2px solid #c6b088; }
+.market-nav .tabs { margin: 0; border: 0; flex-wrap: wrap; }
+.market-reset { font-size: 14px; color: #776145; white-space: nowrap; padding: 8px 0; }
+.market-reset b { display: inline-block; min-width: 74px; color: #234831; }
+.market-section-head { display: flex; justify-content: space-between; align-items: center; gap: 14px; margin-bottom: 14px; }
+.market-section-head h3 { font-size: 22px; margin: 0 0 3px; }
+.market-products { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.market-product { min-width: 0; display: flex; flex-direction: column; align-items: center; text-align: center; padding: 14px 10px; background: #efe0bf; border-bottom: 3px solid #b79e73; gap: 10px; }
+.market-product > b { min-height: 40px; display: flex; align-items: center; justify-content: center; font-size: 17px; }
+.market-art { height: 110px; width: 100%; display: flex; justify-content: center; align-items: center; }
+.shop-panel .market-art img { max-width: 100%; max-height: 104px; width: auto; height: auto; object-fit: contain; image-rendering: pixelated; }
+.shop-panel .market-art .plant-art { height: 88px; }
+.market-product > small { font-size: 13px; color: #776145; min-height: 18px; }
+.market-product > .btn { margin-top: auto; }
+.market-season .season-art { font-size: 42px; display: block; }
+.market-season p { margin: 0; font-size: 15px; }
+.market-extras { display: grid; grid-template-columns: 1fr 1fr; gap: 28px; margin-top: 24px; padding-top: 20px; border-top: 2px solid #c6b088; align-items: start; }
+.market-feature { min-width: 0; }
+.market-card { display: flex; align-items: center; gap: 18px; }
+.shop-panel .market-card .tcard { width: 128px; min-width: 128px; }
+.market-card p { color: #776145; font-size: 16px; }
+.market-no-card { text-align: center; padding: 24px 8px; color: #776145; }
+.market-no-card > span { display: block; font-size: 32px; color: #ab8e4d; margin-bottom: 8px; }
+.market-no-card p { font-size: 15px; }
+.shop-panel .market-extras .spin-box { border: 0; box-shadow: none; background: transparent; padding: 0 8px; min-width: 0; width: auto; }
+.shop-panel .market-extras .spin-box h3 { font-size: 22px; margin: 0 0 8px; }
+.shop-panel .market-extras .spin-box p { font-size: 15px; margin: 4px 0; }
+.shop-panel .market-extras .machine.v3 { max-width: 320px; margin: 8px auto 0; }
+@media (max-width: 800px) {
+ .panel.shop-panel { padding: 18px; }
+ .market-head { align-items: start; flex-direction: column; gap: 12px; }
+ .market-nav { flex-wrap: wrap; gap: 0; margin: 14px 0; }
+ .market-wallet { gap: 12px; }
+ .market-products { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+ .market-extras { gap: 18px; }
+ .market-card { flex-direction: column; align-items: center; text-align: center; }
+ .market-section-head { flex-wrap: wrap; }
+}
+@media (max-width: 520px) {
+ .market-extras { grid-template-columns: 1fr; }
+ .market-head h2 { font-size: 26px; }
+ .market-nav .tabs button { font-size: 15px; padding: 8px 10px; }
+}
