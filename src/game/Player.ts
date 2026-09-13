@@ -3,7 +3,7 @@ import { sfx } from '../ui/audio';
 
 export type Dir = 'up' | 'down' | 'left' | 'right';
 export const WALK = 230, RUN = 380;
-export const FRAME = { w: 96, h: 140 };
+export const FRAME = { w: 160, h: 140 };
 export const CHARACTERS = 20;
 
 /**
@@ -26,7 +26,7 @@ export class Player extends Phaser.Physics.Arcade.Sprite {
     scene.physics.add.existing(this);
     this.setOrigin(0.5, 1);
     this.setScale(scale);
-    this.body!.setSize(40, 20).setOffset(28, 118);
+    this.body!.setSize(40, 20).setOffset((FRAME.w - 40) / 2, 118);
     this.label = scene.add.text(x, y - FRAME.h * this.scaleY - 6, name, { fontFamily: 'Pixelify Sans', fontSize: '16px', color: '#F0EBCC', stroke: '#103523', strokeThickness: 4 }).setOrigin(0.5, 1);
     this.play(`idle_down_${character}`);
   }

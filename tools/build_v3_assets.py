@@ -1,13 +1,14 @@
 """v3 asset pipeline: cut the sprite sheets in design/ into the individual PNGs the game loads.
 
 Outputs (all under public/assets/):
-  chars/char_{0..19}.png    96x140 x 12 frames: 0-1 idle down, 2-3 walk down, 4-5 idle up, 6-7 walk up, 8-9 idle side (faces right), 10-11 walk side
+  chars/char_{0..19}.png    160x140 x 12 frames: 0-1 idle down, 2-3 walk down, 4-5 idle up, 6-7 walk up, 8-9 idle side (faces right), 10-11 walk side
   chars/portrait_{i}.png    160x240 front view
   plants/flower_{1..20}.png, plants/tree_{21..32}.png, plants/twig.png
   fence/{piece}_{color}.png 17 autotile pieces x 7 colours (see PIECES / COLORS)
   furniture/f_{id}.png      40 curated items (see FURNITURE); prints the footprint table to paste into rules.ts
   scenes/house_ext.png, scenes/home_bg.png, ui/map.png, ui/spin_machine.png, scenes/soil.png
 Run from the repo root: PYTHONUTF8=1 python tools/build_v3_assets.py
+Use --sprites-only to rebuild just the in-game characters, preserving portraits and scenery.
 """
 import os, sys, glob, colorsys, json
 sys.path.insert(0, os.path.dirname(__file__))
@@ -20,12 +21,15 @@ for d in ['chars', 'plants', 'fence', 'furniture', 'scenes', 'ui']:
     os.makedirs(OUT + d, exist_ok=True)
 
 # ---------- characters ----------
-FW, FH, H_CHAR = 96, 140, 132
+FW, FH, H_CHAR = 160, 140, 132
+SPRITES_ONLY = '--sprites-only' in sys.argv
 
-def fit(im, w, h, target_h):
+def fit(im, w, h, target_h, bottom=0):
     s = target_h / im.height
     r = im.resize((max(1, round(im.width * s)), target_h), Image.LANCZOS)
-    c = Image.new('RGBA', (w, h), (0, 0, 0, 0)); c.paste(r, ((w - r.width) // 2, h - target_h), r)
+    if bottom:
+        assert r.width <= w - 4, f'Character art exceeds frame width: {r.width} > {w - 4}'
+    c = Image.new('RGBA', (w, h), (0, 0, 0, 0)); c.paste(r, ((w - r.width) // 2, h - target_h - bottom), r)
     return c
 def breath(frame, split=0.62):
     """second idle frame: upper body 1px lower (chest rising illusion), feet untouched"""
@@ -50,7 +54,8 @@ def walk_strip(im):
     scale = H_CHAR / (y1 - y0); out = []
     for x0, x1 in runs:
         fr = im.crop((x0, y0, x1, y1)); r = fr.resize((max(1, round(fr.width * scale)), H_CHAR), Image.LANCZOS)
-        c = Image.new('RGBA', (FW, FH), (0, 0, 0, 0)); c.paste(r, ((FW - r.width) // 2, FH - H_CHAR), r); out.append(c)
+        assert r.width <= FW - 4, f'Walk art exceeds frame width: {r.width} > {FW - 4}'
+        c = Image.new('RGBA', (FW, FH), (0, 0, 0, 0)); c.paste(r, ((FW - r.width) // 2, FH - H_CHAR - 2), r); out.append(c)
     return out
 
 for i in range(20):
@@ -58,12 +63,16 @@ for i in range(20):
     walk = next(f for f in files if f.width > 1500)
     side = next(f for f in files if f.width <= 1500 and f.height > 800)
     front = next(f for f in files if f.width <= 1500 and f.height <= 800)
-    f = fit(tight(front), FW, FH, H_CHAR); s = fit(tight(side), FW, FH, H_CHAR); w = walk_strip(walk)
+    f = fit(tight(front), FW, FH, H_CHAR, bottom=2); s = fit(tight(side), FW, FH, H_CHAR, bottom=2); w = walk_strip(walk)
     frames = [f, breath(f), f, lift(f), w[0], breath(w[0]), w[1], w[3], s, breath(s), s, lift(s)]
     sheet = Image.new('RGBA', (FW * 12, FH), (0, 0, 0, 0))
     for j, fr in enumerate(frames): sheet.paste(fr, (j * FW, 0))
     sheet.save(OUT + f'chars/char_{i}.png')
-    fit(tight(front), 160, 240, 236).save(OUT + f'chars/portrait_{i}.png')
+    if not SPRITES_ONLY:
+        fit(tight(front), 160, 240, 236).save(OUT + f'chars/portrait_{i}.png')
+if SPRITES_ONLY:
+    print('20 character sheets rebuilt; portraits and scenery unchanged')
+    sys.exit(0)
 for f in glob.glob(OUT + 'chars/char_2[0-3].png') + glob.glob(OUT + 'chars/portrait_2[0-3].png'): os.remove(f)
 print('chars ok')
 
