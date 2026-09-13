@@ -10,7 +10,7 @@ import { T, W, H, TT, layerFrom, solidRect } from './tiles';
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
 const PLANT_H = { flower: 54, tree: 150, twig: 30 };
-const PLAYER_SCALE = 0.45; // Fit characters to the garden fences and small outdoor objects.
+const PLAYER_SCALE = 0.65; // Fit characters to the garden fences and small outdoor objects.
 
 /**
  * The garden: an N x N editable grid (N from level) below the house, with a grass margin around it.
