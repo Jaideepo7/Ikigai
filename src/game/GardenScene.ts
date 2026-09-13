@@ -54,6 +54,10 @@ export class GardenScene extends Phaser.Scene {
   async create(data: { ownerId: number; spawn?: 'gate' | 'porch' }) {
     this.teardown(); this.ready = false; this.exiting = false; this.edit = null;
     this.ownerId = data.ownerId;
+    // Clear any leftover fade from the previous scene so transitions never stick on a black screen.
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.fadeIn(200, 11, 15, 10);
     const own = this.ownerId === me().user.id;
     this.view = own
       ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences }
@@ -249,11 +253,13 @@ export class GardenScene extends Phaser.Scene {
       if (plant.kind === 'tree' && stage >= 2) this.plantBodies.push(solidRect(this, this.walls, cx - 16, by - 14, 32, 14));
     }
     if (this.hoverPlot && !this.view.plots.includes(this.hoverPlot)) this.hoverPlot = this.view.plots.find((q) => q.id === this.hoverPlot!.id) ?? null;
+    // FROZEN banner is visual-only for visitors; only the owner freezes via Settings at home.
     this.freeze?.destroy(); this.freeze = undefined;
     if (this.view.owner.frozen) {
       const gx = this.ox + this.gc0 * T, gy = this.oy + this.gr0 * T, s = this.n * T;
-      const r = this.add.rectangle(gx + s / 2, gy + s / 2, s, s, 0x9fd8ff, 0.35).setDepth(900);
-      const t = this.add.text(gx + s / 2, gy + 10, '❄ FROZEN ❄', { fontFamily: 'Pixelify Sans', fontSize: '28px', color: '#e8f6ff', stroke: '#2a5a8a', strokeThickness: 5 }).setOrigin(0.5, 0).setDepth(901);
+      const r = this.add.rectangle(gx + s / 2, gy + s / 2, s, s, 0x9fd8ff, 0.35).setDepth(900).setInteractive(false);
+      const label = this.ownerId === me().user.id ? '❄ FROZEN ❄' : `❄ ${this.view.owner.username}'s garden is frozen ❄`;
+      const t = this.add.text(gx + s / 2, gy + 10, label, { fontFamily: 'Pixelify Sans', fontSize: '22px', color: '#e8f6ff', stroke: '#2a5a8a', strokeThickness: 5 }).setOrigin(0.5, 0).setDepth(901);
       this.freeze = this.add.container(0, 0, [r, t]);
     }
   }
@@ -466,8 +472,13 @@ export class GardenScene extends Phaser.Scene {
     if (document.getElementById('waiting')) return; // still knocking — stay in the garden until accepted / cancelled
     if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir === 'up') {
       this.exiting = true;
-      this.cameras.main.fadeOut(250, 11, 15, 10);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'door', ownerId: this.ownerId }));
+      const ownerId = this.ownerId;
+      const cam = this.cameras.main;
+      let done = false;
+      const go = () => { if (done) return; done = true; this.scene.start('House', { spawn: 'door', ownerId }); };
+      cam.once('camerafadeoutcomplete', go);
+      cam.fadeOut(250, 11, 15, 10);
+      this.time.delayedCall(700, go);
     }
   }
 }

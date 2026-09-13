@@ -51,6 +51,10 @@ export class HouseScene extends Phaser.Scene {
     this.ready = false; this.exiting = false; this.placing = null; this.editing = false;
     this.furnitureSprites = []; this.furnitureBodies = []; this.spots = []; this.visitPlaced = null; this.visitName = '';
     this.ownerId = data.ownerId ?? me().user.id;
+    // Clear any leftover fade from the previous scene so transitions never stick on a black screen.
+    this.cameras.main.resetFX();
+    this.cameras.main.setAlpha(1);
+    this.cameras.main.fadeIn(200, 11, 15, 10);
     const own = this.ownerId === me().user.id;
 
     if (!own) {
@@ -347,8 +351,7 @@ export class HouseScene extends Phaser.Scene {
   private leaveToOwnHome() {
     detachDomain(this.ownerId);
     setVisitBadge(null);
-    this.cameras.main.fadeOut(250, 11, 15, 10);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }));
+    this.fadeTo(() => this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }));
   }
   private async leaveToGarden() {
     const data = { ownerId: this.ownerId, spawn: 'porch' as const };
@@ -357,7 +360,15 @@ export class HouseScene extends Phaser.Scene {
       if (isPomodoroActive()) { toast(POMODORO_LOCK_MSG, 'err'); stepBack(); return; }
       if (me().user.frozen) { stepBack(); await goto('Garden', data); return; }   // goto() shows the unfreeze dialog
     }
-    this.cameras.main.fadeOut(250, 11, 15, 10);
-    this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('Garden', data));
+    this.fadeTo(() => this.scene.start('Garden', data));
+  }
+  /** Fade out then run next scene; always recover if the fade callback is missed. */
+  private fadeTo(next: () => void) {
+    const cam = this.cameras.main;
+    let done = false;
+    const go = () => { if (done) return; done = true; next(); };
+    cam.once('camerafadeoutcomplete', go);
+    cam.fadeOut(250, 11, 15, 10);
+    this.time.delayedCall(700, go);
   }
 }

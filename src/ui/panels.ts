@@ -518,15 +518,19 @@ export async function shopPanel(tab: ShopTab = 'shop') {
 // ---------- settings ----------
 export function settingsPanel() {
   const m = me(), u = m.user, s = m.stats, lv = level().level;
+  const visiting = (() => { const sc = activeScene() as { ownerId?: number } | undefined; return sc?.ownerId != null && sc.ownerId !== u.id; })();
   const tog = (k: string, val: number, label: string, hint = '') => `<div class="setting"><span>${label}${hint ? `<br/><small>${hint}</small>` : ''}</span><div class="toggle ${val ? 'on' : ''}" data-k="${k}"><i></i></div></div>`;
   const stat = (k: string, label: string) => `<div><b class="num">${s[k] ?? 0}</b>${label}</div>`;
+  const freezeHint = visiting
+    ? 'Freeze only works on your own garden. Go home to freeze or unfreeze your farm.'
+    : `Away for a while? Plants will not wither and your streak is safe. Your farm is closed while frozen. ${num(m.freezesLeft)} of ${FREEZES_PER_MONTH} freezes left this month.`;
   const p = openPanel(`<h2>⚙ Settings</h2><p class="sub">${esc(u.username)} · friend code <b>${u.friend_code}</b>${u.is_admin ? ' · admin test account' : ''}</p>
     ${u.is_admin ? `<div class="setting"><span>🧪 Admin level <b class="num" id="lvl-v">${lv}</b><br/><small>0-100. The garden is ${gardenTiles(lv)}×${gardenTiles(lv)} tiles at this level and grows one tile every 5 levels.</small></span><input type="range" id="lvl" min="0" max="${MAX_LEVEL}" value="${lv}" /></div>` : ''}
     ${tog('music', u.music, '🎵 Music')}
     <div class="setting sub-setting"><span>Track</span><div class="choice small" id="tracks">${TRACKS.map((t, i) => `<button data-track="${i}" class="${u.music_track === i ? 'on' : ''}">${t}</button>`).join('')}</div></div>
     <div class="setting sub-setting"><span>Volume <b class="num" id="vol-v">${u.music_volume}</b></span><input type="range" id="vol" min="0" max="100" value="${u.music_volume}" /></div>
     ${tog('sfx', u.sfx, '🔊 Sound effects', 'steps, planting, coins')}
-    <div class="setting"><span>❄ Freeze garden<br/><small>Away for a while? Plants will not wither and your streak is safe. Your farm is closed while frozen. ${num(m.freezesLeft)} of ${FREEZES_PER_MONTH} freezes left this month.</small></span><div class="toggle ${u.frozen ? 'on' : ''}" id="freeze"><i></i></div></div>
+    <div class="setting"><span>❄ Freeze garden<br/><small>${freezeHint}</small></span><div class="toggle ${u.frozen ? 'on' : ''} ${visiting ? 'disabled' : ''}" id="freeze" ${visiting ? 'title="Only your own garden can be frozen"' : ''}><i></i></div></div>
     <div class="setting"><span>🌱 Growth pace<br/><small>How long plants take from seed to fully grown. Patient gardeners earn more when a plant matures.</small></span><div class="choice small" id="growth">${GROWTH_OPTIONS.map((g) => `<button data-g="${g.value}" class="${u.growth === g.value ? 'on' : ''}" title="${g.desc}">${g.label}</button>`).join('')}</div></div>
     <p class="sub" style="padding-left:28px">${GROWTH_OPTIONS.find((g) => g.value === u.growth)?.desc ?? ''}</p>
     <div class="setting"><span>🎓 Tutorial</span><button class="btn sm" id="tut">Replay walkthrough</button></div>
@@ -549,6 +553,7 @@ export function settingsPanel() {
   vol.addEventListener('change', () => save({ music_volume: Number(vol.value) }));
   p.querySelectorAll<HTMLElement>('#growth button').forEach((b) => b.addEventListener('click', async () => { p.querySelectorAll('#growth button').forEach((x) => x.classList.remove('on')); b.classList.add('on'); await save({ growth: Number(b.dataset.g) }); toast(`Growth pace: ${b.textContent}`); settingsPanel(); }));
   p.querySelector('#freeze')!.addEventListener('click', async () => {
+    if (visiting) { toast('You can only freeze your own garden', 'err'); return; }
     const on = !u.frozen;
     if (on && !(await confirmDialog('Freeze your garden?', `Your farm closes until you unfreeze it. Plants will not wither and your streak is safe. This uses 1 of your ${m.freezesLeft} remaining freezes this month.`, 'Freeze', 'Not now'))) return settingsPanel();
     try {
