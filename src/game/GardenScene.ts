@@ -1,11 +1,13 @@
 import Phaser from 'phaser';
 import { Player, makeKeys, readInput, typingInDom, type Dir } from './Player';
 import { Net, type PeerState } from './net';
+import { attachDomain, detachDomain, domainNet, domainPeer } from './domainNet';
 import { api } from '../api';
 import { me, level, toast, refreshMe } from '../state';
 import { isPanelOpen, isPomodoroActive, plotDialog, setHint, knockPrompt, waitingOverlay, gardenHud, hideGardenHud, editPalette, hideEditPalette, setNavMode, confirmDialog, type EditTool } from '../ui/panels';
 import { gardenTiles, plantById, plantSprite, plantStage, plantReward, fencePiece, WITHER_MAX, STAGES, effectiveSeason, type GardenSeason, type Plot, type GardenView, type FenceTile } from '../shared/rules';
 import { T, W, H, TT, layerFrom, solidRect } from './tiles';
+import { sfx } from '../ui/audio';
 
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
@@ -57,7 +59,7 @@ export class GardenScene extends Phaser.Scene {
     this.view = own
       ? { owner: { id: me().user.id, username: me().user.username, character: me().user.character, level: level().level, wither: me().user.wither, frozen: me().user.frozen, season: me().user.season, fence_color: me().user.fence_color, growth: me().user.growth }, plots: me().plots, fences: me().fences }
       : await api.get<GardenView>(`/api/garden/${this.ownerId}`).catch((e) => { toast(e.message, 'err'); return null as any; });
-    if (!this.view) return this.scene.start('House', { spawn: 'center' });
+    if (!this.view) { detachDomain(this.ownerId); return this.scene.start('House', { spawn: 'center', ownerId: me().user.id }); }
     this.view.plots = this.view.plots.filter((plot) => !plot.plant_id || plantById(plot.plant_id));
 
     // ---- layout ----
@@ -365,22 +367,39 @@ export class GardenScene extends Phaser.Scene {
 
   // ---------- realtime ----------
   private connect(own: boolean) {
-    const goHome = () => { if (!this.exiting) { this.exiting = true; this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); } };
-    this.net = new Net(this.ownerId, {
-      roster: (_you, peers) => { waitingOverlay(null); peers.forEach((p) => this.addPeer(p)); },
+    const goHome = () => {
+      if (this.exiting) return;
+      this.exiting = true;
+      waitingOverlay(null);
+      detachDomain(this.ownerId);
+      this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id });
+    };
+    this.net = attachDomain(this.ownerId, 'garden', {
+      roster: (_you, peers) => { waitingOverlay(null); this.peers.forEach((p) => p.destroy()); this.peers.clear(); peers.forEach((p) => this.addPeer(p)); },
       join: (p) => { this.addPeer(p); if (own) toast(`${p.name} came to visit`); },
       leave: (id) => { this.peers.get(id)?.destroy(); this.peers.delete(id); },
-      move: (m) => { const p = this.peers.get(m.id); if (!p) return; (p as any).target = { x: m.x, y: m.y }; p.setFacing(m.dir as Dir, m.moving); },
+      move: (m) => {
+        if (m.area === 'house') { this.peers.get(m.id)?.destroy(); this.peers.delete(m.id); return; }
+        let p = this.peers.get(m.id);
+        if (!p) {
+          const known = domainPeer(m.id);
+          this.addPeer({ id: m.id, name: known?.name ?? 'friend', character: known?.character ?? 0, x: m.x, y: m.y, dir: m.dir, moving: m.moving, area: 'garden' });
+          p = this.peers.get(m.id);
+        }
+        if (!p) return;
+        (p as any).target = { x: m.x, y: m.y }; p.setFacing(m.dir as Dir, m.moving);
+      },
       chat: (id, text) => { const p = id === me().user.id ? this.player : this.peers.get(id); if (p) { p.typing = false; p.say(text); } },
       typing: (id, on) => { const p = this.peers.get(id); if (!p) return; if (on) { p.say('. . .', 0); p.typing = true; } else if (p.typing) { p.typing = false; p.clearBubble(); } },
       emote: (id, kind) => this.peers.get(id)?.emote(kind),
-      knocking: () => waitingOverlay(this.view.owner.username, () => { this.net?.close(); goHome(); }),
-      knock: (p) => knockPrompt(p.name, p.character, (accept) => this.net?.visit(p.id, accept)),
+      knocking: () => { sfx.chime(); waitingOverlay(this.view.owner.username, () => goHome()); },
+      knock: (p) => { sfx.chime(); knockPrompt(p.name, p.character, (accept) => domainNet()?.visit(p.id, accept)); },
       denied: () => { waitingOverlay(null); toast(`${this.view.owner.username} is busy right now`, 'err'); goHome(); },
     });
   }
   private addPeer(p: PeerState) {
     if (p.id === me().user.id || this.peers.has(p.id)) return;
+    if (p.area === 'house') return; // missing area = treat as here until their first move
     const pl = new Player(this, p.x || this.doorX, p.y || this.oy + (this.gr0 + 2.6) * T, p.character, p.name, false, PLAYER_SCALE);
     pl.body!.enable = false;
     (pl as any).target = { x: p.x || pl.x, y: p.y || pl.y };
@@ -405,18 +424,19 @@ export class GardenScene extends Phaser.Scene {
     setTimeout(() => input.focus(), 0);
   }
   private teardown() {
-    this.net?.close(); this.net = undefined;
+    // Keep the domain socket open when switching to this owner's house
     this.peers.forEach((p) => p.destroy()); this.peers.clear();
     this.chatEl?.remove(); this.chatEl = undefined;
     this.tipEl?.remove(); this.tipEl = undefined; this.hoverPlot = null;
-    waitingOverlay(null); hideGardenHud(); hideEditPalette(); setNavMode('house');
+    hideGardenHud(); hideEditPalette(); setNavMode('house');
+    this.net = undefined;
   }
 
   update(_t: number, dt: number) {
     if (!this.ready || this.exiting || !this.player.body) return;
     const [vx, vy, run] = isPanelOpen() || typingInDom() || this.chatEl ? [0, 0, false] : readInput(this.keys);
     this.player.drive(vx, vy, run, dt);
-    this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving);
+    this.net?.move(this.player.x, this.player.y, this.player.dir, this.player.moving, 'garden');
     for (const p of this.peers.values()) { const t = (p as any).target; if (t) { p.x += (t.x - p.x) * 0.25; p.y += (t.y - p.y) * 0.25; } }
     this.updateGates();
     const now = Date.now();

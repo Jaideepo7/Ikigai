@@ -2,15 +2,14 @@ import { DurableObject } from 'cloudflare:workers';
 import type { Env } from './index';
 
 /**
- * One room per garden owner. Relays movement, chat, typing and emotes between everyone standing in that garden.
- * Visitors join as "pending" while the owner is present: the owner gets a knock and must accept or decline.
- * If the owner is not in the garden, visitors are let in straight away.
- * The owner's room also carries their "hub" sockets: a lightweight connection every session keeps open so
- * friend requests / acceptances arrive instantly (POST /notify from the Worker). Hub sockets are never peers.
+ * One room per owner domain (house + garden). Relays move / chat / typing / emotes.
+ * Visitors knock while the owner is present anywhere in the domain; once admitted they can
+ * reconnect (house ↔ garden) without knocking again until they leave.
+ * Hub sockets carry friend-request notifications and are never peers.
  */
-interface Peer { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing: boolean; pending: boolean; hub?: boolean }
+interface Peer { id: number; name: string; character: number; x: number; y: number; dir: string; moving: boolean; typing: boolean; pending: boolean; area?: string; hub?: boolean }
 type Msg =
-  | { t: 'move'; x: number; y: number; dir: string; moving: boolean }
+  | { t: 'move'; x: number; y: number; dir: string; moving: boolean; area?: string }
   | { t: 'chat'; text: string }
   | { t: 'typing'; on: boolean }
   | { t: 'emote'; kind: string }
@@ -37,7 +36,8 @@ export class GardenRoom extends DurableObject<Env> {
       return new Response(null, { status: 101, webSocket: client });
     }
     const ownerHere = this.peers().some((p) => p.id === this.ownerId && !p.pending);
-    const pending = me.id !== this.ownerId && ownerHere;
+    const alreadyIn = !!(await this.ctx.storage.get(`in:${me.id}`));
+    const pending = me.id !== this.ownerId && ownerHere && !alreadyIn;
     const peer: Peer = { id: me.id, name: me.name, character: me.character, x: 0, y: 0, dir: 'down', moving: false, typing: false, pending };
     this.ctx.acceptWebSocket(server, [String(me.id)]);
     server.serializeAttachment(peer);
@@ -45,15 +45,16 @@ export class GardenRoom extends DurableObject<Env> {
       server.send(JSON.stringify({ t: 'knocking' }));
       this.sendTo(this.ownerId, { t: 'knock', id: me.id, name: me.name, character: me.character });
     } else {
-      this.admit(server, peer);
+      await this.admit(server, peer);
     }
     await this.ctx.storage.setAlarm(Date.now() + 45_000);
     return new Response(null, { status: 101, webSocket: client });
   }
 
-  /** Let a peer into the room: roster for them, join for everyone else, presence in D1. */
-  private admit(ws: WebSocket, peer: Peer) {
+  /** Let a peer into the domain: roster for them, join for everyone else, remember admission. */
+  private async admit(ws: WebSocket, peer: Peer) {
     peer.pending = false; ws.serializeAttachment(peer);
+    await this.ctx.storage.put(`in:${peer.id}`, 1);
     ws.send(JSON.stringify({ t: 'roster', you: peer.id, peers: this.peers().filter((p) => p.id !== peer.id && !p.pending) }));
     this.broadcast({ t: 'join', peer }, ws);
     this.ctx.waitUntil(this.presence(peer.id, `garden:${this.ownerId}`));
@@ -68,16 +69,16 @@ export class GardenRoom extends DurableObject<Env> {
       for (const s of this.ctx.getWebSockets(String(m.id))) {
         const p = s.deserializeAttachment() as Peer;
         if (!p?.pending) continue;
-        if (m.accept) this.admit(s, p);
+        if (m.accept) this.ctx.waitUntil(this.admit(s, p));
         else { try { s.send(JSON.stringify({ t: 'denied' })); s.close(1000, 'denied'); } catch { /* gone */ } }
       }
       return;
     }
     if (peer.pending) return;
     if (m.t === 'move' && Number.isFinite(m.x) && Number.isFinite(m.y)) {
-      Object.assign(peer, { x: m.x, y: m.y, dir: String(m.dir).slice(0, 5), moving: !!m.moving });
+      Object.assign(peer, { x: m.x, y: m.y, dir: String(m.dir).slice(0, 5), moving: !!m.moving, area: m.area === 'house' ? 'house' : 'garden' });
       ws.serializeAttachment(peer);
-      this.broadcast({ t: 'move', id: peer.id, x: peer.x, y: peer.y, dir: peer.dir, moving: peer.moving }, ws);
+      this.broadcast({ t: 'move', id: peer.id, x: peer.x, y: peer.y, dir: peer.dir, moving: peer.moving, area: peer.area }, ws);
     } else if (m.t === 'chat' && typeof m.text === 'string') {
       const text = m.text.trim().slice(0, 140);
       if (!text) return;
@@ -93,7 +94,6 @@ export class GardenRoom extends DurableObject<Env> {
   async webSocketClose(ws: WebSocket) { await this.drop(ws); }
   async webSocketError(ws: WebSocket) { await this.drop(ws); }
 
-  /** Keep last_seen fresh for everyone still in the room so friends lists show them online. */
   async alarm() {
     const ids = [...new Set(this.peers().filter((p) => !p.pending).map((p) => p.id))];
     if (!ids.length) return;
@@ -106,9 +106,15 @@ export class GardenRoom extends DurableObject<Env> {
     try { ws.close(); } catch { /* already closed */ }
     if (!peer || peer.hub) return;
     if (!peer.pending) this.broadcast({ t: 'leave', id: peer.id });
-    if (!this.peers().some((p) => p.id === peer.id && !p.pending)) await this.presence(peer.id, null);
-    // owner left: anyone still knocking gets in
-    if (peer.id === this.ownerId) for (const s of this.ctx.getWebSockets()) { const p = s.deserializeAttachment() as Peer; if (p?.pending && !p.hub) this.admit(s, p); }
+    // Only clear admission when no socket remains for this user (house↔garden keeps one open)
+    if (!this.peers().some((p) => p.id === peer.id)) {
+      await this.ctx.storage.delete(`in:${peer.id}`);
+      if (!peer.pending) await this.presence(peer.id, null);
+    }
+    // owner left the domain: anyone still knocking gets in
+    if (peer.id === this.ownerId && !this.peers().some((p) => p.id === this.ownerId && !p.pending)) {
+      for (const s of this.ctx.getWebSockets()) { const p = s.deserializeAttachment() as Peer; if (p?.pending && !p.hub) this.ctx.waitUntil(this.admit(s, p)); }
+    }
   }
   private peers(): Peer[] { return this.ctx.getWebSockets().map((s) => s.deserializeAttachment() as Peer).filter((p) => p && !p.hub); }
   private sendTo(id: number, msg: unknown) { for (const s of this.ctx.getWebSockets(String(id))) { try { s.send(JSON.stringify(msg)); } catch { /* closing */ } } }

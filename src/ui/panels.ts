@@ -32,6 +32,7 @@ export function openPanel(html: string, cls = ''): HTMLElement {
   back.querySelector('.x')!.addEventListener('click', closePanel);
   overlay().appendChild(back); panelEl = back; renderMini();
   const panel = back.querySelector<HTMLElement>('.panel')!;
+  upgradeDateInputs(panel);
   upgradeSelects(panel);
   return panel;
 }
@@ -54,6 +55,72 @@ function upgradeSelects(root: HTMLElement) {
     select.insertAdjacentElement('afterend', wrap); wrap.append(trigger, menu); sync();
   });
   root.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.retro-select')) root.querySelectorAll<HTMLElement>('.retro-select-menu').forEach((m) => m.hidden = true); });
+}
+
+/** Replace native date popups with a calendar that matches the game UI. */
+function upgradeDateInputs(root: HTMLElement) {
+  const MIN_YEAR = 2000, MAX_YEAR = 2100;
+  const months = Array.from({ length: 12 }, (_, month) => new Date(2020, month, 1).toLocaleDateString(undefined, { month: 'long' }));
+  const valueOf = (date: Date) => `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+  const parse = (value: string) => { const [year, month, day] = value.split('-').map(Number); return year && month && day ? new Date(year, month - 1, day) : null; };
+
+  root.querySelectorAll<HTMLInputElement>('input[type="date"]').forEach((input) => {
+    input.min = `${MIN_YEAR}-01-01`; input.max = `${MAX_YEAR}-12-31`; input.classList.add('native-date');
+    const today = new Date(), selected = parse(input.value);
+    let shown = selected ?? new Date(Math.min(MAX_YEAR, Math.max(MIN_YEAR, today.getFullYear())), today.getMonth(), 1);
+    const wrap = document.createElement('div'); wrap.className = 'retro-date';
+    wrap.innerHTML = `<button type="button" class="retro-date-trigger" aria-haspopup="dialog" aria-expanded="false"></button>
+      <div class="retro-calendar" role="dialog" aria-label="Choose a date" hidden>
+        <div class="retro-calendar-head"><button type="button" class="calendar-nav prev" aria-label="Previous month">◀</button><div class="calendar-jump"><select class="calendar-month" data-native="1" aria-label="Month">${months.map((month, i) => `<option value="${i}">${month}</option>`).join('')}</select><select class="calendar-year" data-native="1" aria-label="Year">${Array.from({ length: MAX_YEAR - MIN_YEAR + 1 }, (_, i) => `<option>${MIN_YEAR + i}</option>`).join('')}</select></div><button type="button" class="calendar-nav next" aria-label="Next month">▶</button></div>
+        <div class="calendar-weekdays" aria-hidden="true"><span>Su</span><span>Mo</span><span>Tu</span><span>We</span><span>Th</span><span>Fr</span><span>Sa</span></div>
+        <div class="calendar-days" role="grid"></div>
+        <div class="calendar-actions"><button type="button" data-calendar-action="clear">Clear</button><button type="button" data-calendar-action="today">Today</button></div>
+      </div>`;
+    input.insertAdjacentElement('afterend', wrap);
+    const trigger = wrap.querySelector<HTMLButtonElement>('.retro-date-trigger')!, calendar = wrap.querySelector<HTMLElement>('.retro-calendar')!;
+    const monthSelect = wrap.querySelector<HTMLSelectElement>('.calendar-month')!, yearSelect = wrap.querySelector<HTMLSelectElement>('.calendar-year')!;
+    const days = wrap.querySelector<HTMLElement>('.calendar-days')!, prev = wrap.querySelector<HTMLButtonElement>('.prev')!, next = wrap.querySelector<HTMLButtonElement>('.next')!;
+    const syncTrigger = () => { const date = parse(input.value); trigger.textContent = date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : 'Choose a date'; };
+    const selectDate = (value: string) => { input.value = value; input.dispatchEvent(new Event('change', { bubbles: true })); syncTrigger(); calendar.hidden = true; trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); };
+    const render = () => {
+      const year = shown.getFullYear(), month = shown.getMonth();
+      monthSelect.value = String(month); yearSelect.value = String(year);
+      prev.disabled = year === MIN_YEAR && month === 0; next.disabled = year === MAX_YEAR && month === 11;
+      const firstDay = new Date(year, month, 1).getDay();
+      const start = new Date(year, month, 1 - firstDay);
+      days.innerHTML = Array.from({ length: 42 }, (_, i) => {
+        const date = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i), value = valueOf(date);
+        const outside = date.getMonth() !== month, unavailable = date.getFullYear() < MIN_YEAR || date.getFullYear() > MAX_YEAR;
+        const classes = [outside ? 'outside' : '', value === input.value ? 'selected' : '', value === valueOf(today) ? 'today' : ''].filter(Boolean).join(' ');
+        return `<button type="button" role="gridcell" data-date="${value}" class="${classes}" aria-label="${date.toLocaleDateString(undefined, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}" aria-selected="${value === input.value}" ${unavailable ? 'disabled' : ''}>${date.getDate()}</button>`;
+      }).join('');
+    };
+    const moveMonth = (change: number) => { shown = new Date(shown.getFullYear(), shown.getMonth() + change, 1); render(); };
+    const open = () => { const date = parse(input.value); if (date) shown = new Date(date.getFullYear(), date.getMonth(), 1); render(); calendar.hidden = false; trigger.setAttribute('aria-expanded', 'true'); const focusDate = days.querySelector<HTMLButtonElement>('.selected:not(:disabled), .today:not(:disabled), button:not(.outside):not(:disabled)'); focusDate?.focus(); };
+
+    trigger.addEventListener('click', () => calendar.hidden ? open() : (calendar.hidden = true, trigger.setAttribute('aria-expanded', 'false')));
+    prev.addEventListener('click', () => moveMonth(-1)); next.addEventListener('click', () => moveMonth(1));
+    monthSelect.addEventListener('change', () => { shown = new Date(Number(yearSelect.value), Number(monthSelect.value), 1); render(); });
+    yearSelect.addEventListener('change', () => { shown = new Date(Number(yearSelect.value), Number(monthSelect.value), 1); render(); });
+    days.addEventListener('click', (e) => { const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-date]'); if (button && !button.disabled) selectDate(button.dataset.date!); });
+    days.addEventListener('keydown', (e) => {
+      const button = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-date]'); if (!button) return;
+      const step = { ArrowLeft: -1, ArrowRight: 1, ArrowUp: -7, ArrowDown: 7 }[e.key];
+      if (step === undefined) return; e.preventDefault();
+      const date = parse(button.dataset.date!)!; date.setDate(date.getDate() + step);
+      if (date.getFullYear() < MIN_YEAR || date.getFullYear() > MAX_YEAR) return;
+      if (date.getMonth() !== shown.getMonth() || date.getFullYear() !== shown.getFullYear()) { shown = new Date(date.getFullYear(), date.getMonth(), 1); render(); }
+      days.querySelector<HTMLButtonElement>(`[data-date="${valueOf(date)}"]`)?.focus();
+    });
+    wrap.querySelector<HTMLElement>('.calendar-actions')!.addEventListener('click', (e) => {
+      const action = (e.target as HTMLElement).closest<HTMLButtonElement>('[data-calendar-action]')?.dataset.calendarAction;
+      if (action === 'clear') selectDate('');
+      if (action === 'today' && today.getFullYear() >= MIN_YEAR && today.getFullYear() <= MAX_YEAR) selectDate(valueOf(today));
+    });
+    calendar.addEventListener('keydown', (e) => { if (e.key === 'Escape') { calendar.hidden = true; trigger.setAttribute('aria-expanded', 'false'); trigger.focus(); } });
+    root.addEventListener('click', (e) => { if (!(e.target as HTMLElement).closest('.retro-date')) { calendar.hidden = true; trigger.setAttribute('aria-expanded', 'false'); } });
+    syncTrigger();
+  });
 }
 const name = (n: string) => { if (panelEl) panelEl.dataset.name = n; };
 export function setHint(text: string | null) {
@@ -515,7 +582,7 @@ export async function friendsPanel(silent = false) {
 export function knockPrompt(nameText: string, character: number, answer: (accept: boolean) => void) {
   document.getElementById('knock')?.remove();
   const el = document.createElement('div'); el.id = 'knock';
-  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is at your gate.<br/><small>Let them into your garden?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
+  el.innerHTML = `<img src="/assets/chars/portrait_${character}.png" alt="" /><div><b>${esc(nameText)}</b> is at your door.<br/><small>Let them into your home?</small><div class="form-actions" style="justify-content:flex-start;margin-top:8px"><button class="btn sm sage" id="k-yes">Let in</button><button class="btn sm rose" id="k-no">Not now</button></div></div>`;
   overlay().appendChild(el); sfx.chime();
   el.querySelector('#k-yes')!.addEventListener('click', () => { answer(true); el.remove(); });
   el.querySelector('#k-no')!.addEventListener('click', () => { answer(false); el.remove(); });
@@ -644,7 +711,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit drops you in their home by the left gateway; the bottom gateway leads to their garden, and the left one takes you back to yours. Wave and chat with Enter in the garden. They decide whether to let you in.'],
+  ['Friends 👥', 'Walk through the gateway on the right to add friends by code. Visit knocks at their door — they let you into their home. Once inside you can walk between their house and garden freely, see each other in real time, and the left gateway takes you back to yours. Wave and chat with Enter.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }
