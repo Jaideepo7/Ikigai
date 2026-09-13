@@ -319,7 +319,7 @@ export function mapPanel() {
   name('map');
   p.querySelectorAll<HTMLElement>('[data-to]').forEach((b) => b.addEventListener('click', () => {
     sfx.click(); closePanel();
-    if (b.dataset.to === 'house') goto('House', { spawn: 'center' });
+    if (b.dataset.to === 'house') goto('House', { spawn: 'center', ownerId: me().user.id });
     else if (b.dataset.to === 'garden') goto('Garden', { ownerId: me().user.id, spawn: 'gate' });
     else friendsPanel();
   }));
@@ -329,7 +329,7 @@ export function mapPanel() {
 export function inventoryPanel(tab: 'seeds' | 'cards' | 'furniture' | 'seasons' = 'seeds') {
   const m = me();
   const seeds = m.inventory.filter((i) => i.qty > 0);
-  const atHome = activeScene()?.scene.key === 'House';
+  const atHome = (() => { const sc = activeScene() as { scene: { key: string }; ownerId?: number } | undefined; return sc?.scene.key === 'House' && sc.ownerId === me().user.id; })();
   const body = tab === 'seeds'
     ? `<div class="slots big">${seeds.map((s) => { const pl = plantById(s.plant_id)!; return `<div class="slot seed" title="${pl.name} seeds"><div class="bag">${ico('seedbag', 'bag')}${plantImg(pl.id, 'pl')}</div><span class="nm">${pl.name}</span><span class="rar ${pl.rarity}">${pl.kind} · ${pl.rarity}</span><span class="qty num">×${s.qty}</span></div>`; }).join('')}${Array.from({ length: Math.max(0, 8 - seeds.length) }, () => `<div class="slot empty">${ico('seedbag', 'bag dim')}<span class="nm">empty</span></div>`).join('')}</div><p class="sub" style="margin-top:10px">Walk onto a plot in your garden and press E to plant a seed. Buy more in the shop (Q).</p>`
     : tab === 'cards'
@@ -480,7 +480,7 @@ export async function friendsPanel(silent = false) {
   p.querySelector('#fadd')!.addEventListener('click', async () => { try { await api.post('/api/friends/request', { code: (p.querySelector('#fcode') as HTMLInputElement).value }); toast('Request sent!'); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('[data-accept]').forEach((b) => b.addEventListener('click', async () => { try { await api.post('/api/friends/accept', { user_id: Number(b.dataset.accept) }); sfx.chime(); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
   p.querySelectorAll<HTMLElement>('[data-remove]').forEach((b) => b.addEventListener('click', async () => { try { await api.del(`/api/friends/${b.dataset.remove}`); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
-  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => { closePanel(); goto('Garden', { ownerId: Number(b.dataset.visit), spawn: 'gate' }); }));
+  p.querySelectorAll<HTMLElement>('[data-visit]').forEach((b) => b.addEventListener('click', () => { closePanel(); goto('House', { ownerId: Number(b.dataset.visit), spawn: 'hallway' }); }));
 }
 /** Owner side: someone is knocking. Non-modal card in the top-right. */
 export function knockPrompt(nameText: string, character: number, answer: (accept: boolean) => void) {
@@ -615,7 +615,7 @@ const STEPS: [string, string][] = [
   ['Streaks and withering 🍂', 'Finish at least one task a day to keep your streak. Miss two days and your plants start to grey. Freeze the garden in Settings when you are away (2 per month).'],
   ['Shop and cards 🏪', 'Press Q at home for the daily plants, furniture and the spin. Cards are rare: at most one appears in the shop, and it costs gems.'],
   ['Your home 🪑', 'Buy furniture, then place it from the Inventory. Edit room moves pieces or puts them back. The bed, desk and bookcase are where you sleep, plan and show cards.'],
-  ['Friends 👥', 'Walk through the door on the right to add friends by code. Visit their garden, wave and chat with Enter. They decide whether to let you in.'],
+  ['Friends 👥', 'Walk through the hallway on the right to add friends by code. Visit drops you in their home by the left exit; the bottom door leads to their garden, and the left hallway takes you back to yours. Wave and chat with Enter in the garden. They decide whether to let you in.'],
 ];
 export function tutorial(step = 0) {
   if (step >= STEPS.length) { closePanel(); api.post('/api/me/settings', { tutorial_done: 1 }).then(refreshMe).catch(() => {}); return; }

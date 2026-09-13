@@ -130,7 +130,7 @@ export class GardenScene extends Phaser.Scene {
     this.connect(own);
     setNavMode('garden');
     if (own) gardenHud(this.n, { onEdit: () => this.setEdit(!this.edit), onSnapshot: () => this.snapshot() });
-    setHint(own ? 'E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run · walk up to the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door = go home`);
+    setHint(own ? 'E on a tile: hoe / plant / grassify · Edit: fences, gates, moving · Enter chat · F wave · Shift run · walk up to the door to go inside' : `Visiting ${this.view.owner.username}'s garden · Enter chat · F wave · door = their home`);
     this.ready = true;
   }
 
@@ -364,7 +364,7 @@ export class GardenScene extends Phaser.Scene {
 
   // ---------- realtime ----------
   private connect(own: boolean) {
-    const goHome = () => { if (!this.exiting) { this.exiting = true; this.scene.start('House', { spawn: 'friends' }); } };
+    const goHome = () => { if (!this.exiting) { this.exiting = true; this.scene.start('House', { spawn: 'hallway', ownerId: me().user.id }); } };
     this.net = new Net(this.ownerId, {
       roster: (_you, peers) => { waitingOverlay(null); peers.forEach((p) => this.addPeer(p)); },
       join: (p) => { this.addPeer(p); if (own) toast(`${p.name} came to visit`); },
@@ -432,10 +432,11 @@ export class GardenScene extends Phaser.Scene {
       if (tileHere) { const { x, y } = this.tilePx(tileHere[0], tileHere[1]); this.highlight.setPosition(x + T / 2, y + T / 2); }
     }
     if (this.tipEl) this.updateTip(this.input.activePointer);
+    if (document.getElementById('waiting')) return; // still knocking — stay in the garden until accepted / cancelled
     if (Math.abs(this.player.x - this.doorX) < 36 && this.player.y < this.doorY - 22 && this.player.dir === 'up') {
       this.exiting = true;
       this.cameras.main.fadeOut(250, 11, 15, 10);
-      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'door' }));
+      this.cameras.main.once('camerafadeoutcomplete', () => this.scene.start('House', { spawn: 'door', ownerId: this.ownerId }));
     }
   }
 }

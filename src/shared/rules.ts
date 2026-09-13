@@ -243,5 +243,6 @@ export interface MeResponse {
   folders: string[]; seasons: Season[]; daily: Daily; stats: Record<string, number>; tasks: Task[]; freezesLeft: number;
 }
 export interface GardenView { owner: { id: number; username: string; character: number | null; level: number; wither: number; frozen: number; season: Season; fence_color: FenceColor; growth: number }; plots: Plot[]; fences: FenceTile[] }
+export interface HouseView { owner: { id: number; username: string; character: number | null }; placed: PlacedFurniture[] }
 export interface FriendRow { id: number; username: string; character: number | null; status: 'accepted' | 'incoming' | 'outgoing'; online: boolean; location: string | null }
 export interface ShopInfo { plants: number[]; furniture: number[]; card: number | null; ownedCards: number[]; collected: number[]; day: string; daily: { spun: number } }
