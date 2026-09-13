@@ -327,49 +327,308 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .stats-grid b.num { font-size: 30px; }
 
 /* ---------- shop and room inventory ---------- */
-.panel.shop-panel { padding: 0; overflow: hidden; border-color: #4a2e14; }
-.shop-panel > .x { position: absolute; right: 16px; top: 16px; margin: 0; }
-.shop-shell { max-height: calc(100dvh - var(--nav-height) - 32px); overflow: auto; background: #769bb0; }
-.shop-head { display: flex; justify-content: space-between; align-items: center; gap: 24px; padding: 22px 70px 18px 28px; color: var(--cream); border-bottom: 4px solid var(--navy); }
-.shop-head h2 { color: var(--cream); font-size: 38px; }
-.shop-head p { margin: 2px 0 0; font-family: var(--font-pixel); }
-.shop-currency { display: flex; gap: 8px; }
-.shop-currency > span { display: grid; grid-template-columns: 28px auto; align-items: center; column-gap: 6px; min-width: 112px; padding: 6px 10px; color: var(--ink); background: var(--paper); border: 3px solid #4a2e14; box-shadow: 3px 3px 0 rgba(0,0,0,.35); }
-.shop-currency img { grid-row: 1 / 3; }
-.shop-currency small { font-family: var(--font-pixel); font-size: 11px; }
-.shop-tabs { display: flex; gap: 6px; padding: 10px 28px; background: #638ba5; border-bottom: 4px solid var(--navy); overflow-x: auto; }
-.shop-tabs button { flex: 0 0 auto; padding: 7px 14px; border: 3px solid var(--cream); color: var(--cream); background: transparent; font-family: var(--font-pixel); font-weight: 700; }
-.shop-tabs button.on { color: var(--forest); background: var(--cream); }
-.shop-main { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; padding: 18px; align-items: start; }
-.shop-main > section, .shop-section { padding: 18px; background: var(--paper); border: 4px solid #4a2e14; box-shadow: 5px 5px 0 rgba(0,0,0,.28); }
-.shop-main h3, .shop-section h3 { margin: 0 0 10px; font-size: 24px; }
-.shop-main .shop-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.shop-item { min-width: 0; min-height: 190px; align-content: space-between; background: #fff9ea; }
-.shop-item > b { min-height: 38px; display: grid; place-items: center; }
-.shop-section { margin: 18px; }
-.section-copy { margin-bottom: 14px; }
-.section-copy h3 { margin-bottom: 2px; }
-.section-copy p { margin: 0; color: #6b5a48; }
-.shop-card-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
-.shop-card-item { display: grid; justify-items: center; align-content: space-between; gap: 8px; min-width: 0; min-height: 230px; padding: 10px; background: var(--paper2); border: 3px solid #b39871; box-shadow: inset 0 0 0 2px #fff9ea; }
-.shop-card-item .tcard { width: 100%; max-width: 150px; }
-.owned-label { display: inline-grid; place-items: center; min-height: 30px; padding: 3px 10px; color: var(--forest); background: #dbe9c9; border: 2px solid var(--forest); font-family: var(--font-pixel); font-weight: 700; }
-.furniture-shop { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
-.furniture-art { display: grid; place-items: center; width: 72px; height: 72px; font-size: 44px; background: var(--paper2); border: 3px solid #b39871; }
-.furniture-inventory { display: grid; gap: 10px; }
-.furniture-item { display: grid; grid-template-columns: auto 1fr 180px; align-items: center; gap: 12px; padding: 10px 14px; background: #fff9ea; border: 3px solid #d9c8a5; }
-.furniture-item .furniture-art { width: 54px; height: 54px; font-size: 32px; }
-.furniture-item div { display: grid; }
-.furniture-item small { color: #6b5a48; }
-.furniture-item select { padding: 8px; border: 3px solid #b39871; background: var(--paper2); }
-.season-grid { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 10px; }
-.season-card { display: grid; gap: 6px; justify-items: center; padding: 12px 8px; border: 3px solid #b39871; background: #fff9ea; font-family: var(--font-pixel); }
-.season-card.on { border-color: var(--forest); box-shadow: inset 0 0 0 3px var(--sage); }
-.season-card small { min-height: 32px; color: #6b5a48; }
-.season-card em { padding: 2px 8px; color: var(--cream); background: var(--forest); font-style: normal; }
-.season-art { display: grid; place-items: center; width: 66px; height: 66px; font-size: 38px; border: 3px solid var(--navy); background: #a9cedb; }
-.season-art.fall { background: #d99a6c; }.season-art.winter { background: #e8f4f8; }.season-art.rainy { background: #819eb6; }
-.season-now { margin: 14px 0 0; text-transform: capitalize; text-align: center; font-family: var(--font-pixel); }
+
+.panel.shop-panel {
+  padding: 24px 28px;
+  overflow: hidden;
+  background: var(--paper);
+  border: 6px solid #8b5a2b;
+  outline: 3px solid #4a2e14;
+}
+
+.shop-panel > .x {
+  position: absolute;
+  right: 12px;
+  top: 12px;
+  margin: 0;
+  z-index: 10;
+}
+
+/* Main shop background */
+.shop-shell {
+  max-height: calc(100dvh - var(--nav-height) - 80px);
+  overflow: auto;
+
+  /* changed from blue */
+  background: var(--paper);
+
+  padding: 0;
+}
+
+/* Shop header now matches inventory/pomodoro */
+.shop-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 24px;
+
+  padding: 0 52px 16px 0;
+  margin-bottom: 14px;
+
+  color: var(--ink);
+
+  /* remove blue/navy treatment */
+  background: transparent;
+  border-bottom: 3px solid #b39871;
+}
+
+.shop-head h2 {
+  margin: 0;
+  color: var(--ink);
+  font-size: 38px;
+}
+
+.shop-head p {
+  margin: 2px 0 0;
+  color: #6b5a48;
+  font-family: var(--font-pixel);
+}
+
+/* Currency boxes */
+.shop-currency {
+  display: flex;
+  gap: 8px;
+}
+
+.shop-currency > span {
+  display: grid;
+  grid-template-columns: 28px auto;
+  align-items: center;
+  column-gap: 6px;
+
+  min-width: 112px;
+  padding: 6px 10px;
+
+  color: var(--ink);
+  background: #fff9ea;
+
+  border: 3px solid #b39871;
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, .25);
+}
+
+.shop-currency img {
+  grid-row: 1 / 3;
+}
+
+.shop-currency small {
+  font-family: var(--font-pixel);
+  font-size: 11px;
+  color: #6b5a48;
+}
+
+/* Main layout */
+.shop-main {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  gap: 16px;
+
+  /* remove blue area around sections */
+  padding: 0;
+
+  align-items: start;
+}
+
+/* Individual shop sections */
+.shop-col {
+  display: grid;
+  gap: 14px;
+}
+
+.shop-col section,
+.shop-main > section,
+.shop-section {
+  padding: 14px 16px;
+
+  background: #fff9ea;
+  border: 3px solid #b39871;
+
+  /* softer, like the rest of the UI */
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, .18);
+}
+
+/* Section headings */
+.sec-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 10px;
+}
+
+.sec-head h3 {
+  margin: 0;
+  font-size: 24px;
+  color: var(--ink);
+}
+
+.sec-head .reset {
+  font-family: var(--font-pixel);
+  font-size: 13px;
+
+  background: #dbe9c9;
+  border: 2px solid #4f7a52;
+
+  padding: 2px 8px;
+}
+
+.sec-head .link {
+  margin-left: auto;
+
+  background: none;
+  border: 0;
+
+  font-family: var(--font-pixel);
+  font-size: 15px;
+
+  /* use game green instead of blue */
+  color: var(--forest);
+
+  text-decoration: underline;
+}
+
+/* Product cards */
+.shop-grid {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 12px;
+}
+
+.shop-main .shop-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.shop-grid.five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.shop-item {
+  min-width: 0;
+  min-height: 190px;
+
+  background: var(--paper2);
+  border: 3px solid #cbb48f;
+
+  padding: 10px;
+
+  text-align: center;
+  font-family: var(--font-pixel);
+
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  align-content: space-between;
+
+  box-shadow:
+    inset 3px 3px 0 rgba(255, 255, 255, .5),
+    3px 3px 0 rgba(0, 0, 0, .18);
+}
+
+.shop-item > b {
+  min-height: 38px;
+  display: grid;
+  place-items: center;
+}
+
+.shop-item img {
+  height: 64px;
+}
+
+.shop-item.plant,
+.shop-item.furn {
+  min-height: 210px;
+}
+
+/* Daily spin */
+.spin-box {
+  align-self: start;
+  min-width: 0;
+
+  background: #e2edd2;
+  border: 3px solid #4f7a52;
+
+  padding: 14px;
+
+  text-align: center;
+  font-family: var(--font-pixel);
+
+  box-shadow: 3px 3px 0 rgba(0, 0, 0, .18);
+}
+
+.spin-box h3 {
+  margin-top: 0;
+  color: var(--ink);
+}
+
+/* Collections */
+.shop-section {
+  margin: 0;
+}
+
+.shop-card-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.shop-card-item {
+  display: grid;
+  justify-items: center;
+  align-content: space-between;
+  gap: 8px;
+
+  min-width: 0;
+  min-height: 230px;
+
+  padding: 10px;
+
+  background: var(--paper2);
+  border: 3px solid #b39871;
+
+  box-shadow: inset 0 0 0 2px #fff9ea;
+}
+
+/* Mobile */
+@media (max-width: 900px) {
+  .shop-head {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .shop-main {
+    grid-template-columns: 1fr;
+  }
+
+  .shop-main .shop-grid,
+  .furniture-shop {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .shop-card-grid,
+  .season-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+@media (max-width: 560px) {
+  .shop-head {
+    padding: 0 42px 14px 0;
+  }
+
+  .shop-currency {
+    width: 100%;
+    flex-wrap: wrap;
+  }
+
+  .shop-currency > span {
+    flex: 1;
+  }
+
+  .shop-main .shop-grid,
+  .furniture-shop,
+  .shop-card-grid,
+  .season-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
 
 @media (max-width: 900px) {
   #navbar { padding: 0 8px; }.hud { margin-left: 10px; }.nav-btn { min-width: 58px; padding-inline: 4px; }.nav-btn span, .nav-btn kbd { display: none; }
