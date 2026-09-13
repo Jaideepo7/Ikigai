@@ -10,7 +10,7 @@ import { T, W, H, TT, SCALE, layerFrom, solidRect } from './tiles';
 
 const MARGIN = 3;          // grass tiles around the editable garden
 const HOUSE_ROWS = 7;      // rows above the garden that the house occupies
-const PLANT_H = { flower: 54, tree: 150, twig: 30 };
+const PLANT_H = { flower: 54 * 1.15, tree: 150, twig: 30 };
 const PLAYER_SCALE = 0.65; // Fit characters to the garden fences and small outdoor objects.
 
 /**
@@ -32,6 +32,7 @@ export class GardenScene extends Phaser.Scene {
   private walls!: Phaser.Physics.Arcade.StaticGroup;
   private plotLayer!: Phaser.GameObjects.Container;
   private fenceLayer!: Phaser.GameObjects.Container;
+  private plantSprites: Phaser.GameObjects.Image[] = [];
   private plantBodies: Phaser.GameObjects.GameObject[] = [];
   private fenceBodies: Phaser.GameObjects.GameObject[] = [];
   private gates: { tx: number; ty: number; img: Phaser.GameObjects.Image; open: boolean; vertical: boolean }[] = [];
@@ -109,7 +110,7 @@ export class GardenScene extends Phaser.Scene {
     this.drawDecorTrees();
 
     // ---- garden contents ----
-    this.plotLayer = this.add.container(0, 0);
+    this.plotLayer = this.add.container(0, 0).setDepth(-5); // soil only; plants are scene children so they y-sort with the player
     this.fenceLayer = this.add.container(0, 0);
     this.grid = this.add.graphics().setDepth(4).setVisible(false);
     this.grid.lineStyle(1, 0xf0ebcc, 0.35);
@@ -237,7 +238,9 @@ export class GardenScene extends Phaser.Scene {
 
   // ---------- plots + plants ----------
   drawPlots() {
-    this.plotLayer.removeAll(true); this.plantBodies.forEach((b) => b.destroy()); this.plantBodies = [];
+    this.plotLayer.removeAll(true);
+    this.plantSprites.forEach((s) => s.destroy()); this.plantSprites = [];
+    this.plantBodies.forEach((b) => b.destroy()); this.plantBodies = [];
     const wither = this.view.owner.wither / WITHER_MAX;
     const tint = Phaser.Display.Color.Interpolate.ColorWithColor(new Phaser.Display.Color(255, 255, 255), new Phaser.Display.Color(120, 115, 105), 1, wither);
     const tintHex = Phaser.Display.Color.GetColor(tint.r, tint.g, tint.b);
@@ -247,9 +250,9 @@ export class GardenScene extends Phaser.Scene {
       const stage = p.plant_id ? plantStage(p, now) : -1;
       // Mature plants blend into the lawn: grass underfoot instead of bare soil.
       if (p.plant_id && stage >= STAGES) {
-        this.plotLayer.add(this.add.image(x, y, 'tinytown', TT.grass[p.id % TT.grass.length]).setOrigin(0).setScale(SCALE).setDepth(-5));
+        this.plotLayer.add(this.add.image(x, y, 'tinytown', TT.grass[p.id % TT.grass.length]).setOrigin(0).setScale(SCALE));
       } else {
-        this.plotLayer.add(this.add.image(x, y, 'soil').setOrigin(0).setDepth(-5));
+        this.plotLayer.add(this.add.image(x, y, 'soil').setOrigin(0));
       }
       if (!p.plant_id) continue;
       const plant = plantById(p.plant_id)!;
@@ -258,11 +261,12 @@ export class GardenScene extends Phaser.Scene {
       const key = stage === 1 ? 'twig' : plantSprite(plant);
       const tex = this.textures.get(key).getSourceImage() as HTMLImageElement;
       const targetH = stage === 1 ? PLANT_H.twig : PLANT_H[plant.kind] * (stage === 2 ? 0.55 : 1);
+      // Scene children (not plotLayer) so depth = foot Y sorts with Player.setDepth(y): walk above → behind plant, walk below → in front.
       const im = this.add.image(cx, by, key).setOrigin(0.5, 1).setScale(targetH / tex.height).setDepth(by).setTint(tintHex).setAlpha(1 - wither * 0.3);
       im.setInteractive({ pixelPerfect: false });
       im.on('pointerover', () => { this.hoverPlot = p; });
       im.on('pointerout', () => { if (this.hoverPlot === p) this.hoverPlot = null; });
-      this.plotLayer.add(im);
+      this.plantSprites.push(im);
       if (plant.kind === 'tree' && stage >= 2) this.plantBodies.push(solidRect(this, this.walls, cx - 16, by - 14, 32, 14));
     }
     if (this.hoverPlot && !this.view.plots.includes(this.hoverPlot)) this.hoverPlot = this.view.plots.find((q) => q.id === this.hoverPlot!.id) ?? null;
