@@ -262,12 +262,18 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .friend .grow { flex: 1; }
 .code-box { display: flex; gap: 8px; align-items: center; margin: 8px 0 14px; font-family: var(--font-pixel); }
 .code-box input { flex: 1; padding: 8px 12px; border: 3px solid #d9c8a5; text-transform: uppercase; }
-.code-box .code { background: var(--forest); color: var(--cream); padding: 6px 14px; font-size: 20px; letter-spacing: 3px; }
+.code-box .code { min-width: 190px; padding: 6px 14px; border: 3px solid var(--forest); background: var(--forest); color: var(--cream); font-family: var(--font-pixel); font-size: 20px; letter-spacing: 3px; cursor: pointer; box-shadow: 3px 3px 0 #000; }
+.code-box .code:hover, .code-box .code:focus-visible { background: #1d5338; }
+.code-box .code:focus-visible { outline: 3px solid var(--bark); outline-offset: 3px; }
+.code-box .code:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
+.code-box .code.copied { background: var(--sage); color: var(--forest); }
+.clipboard-copy { position: fixed; left: -9999px; opacity: 0; }
 
 /* chat */
 #chat { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); width: 420px; z-index: 15; }
 #chat input { width: 100%; padding: 10px 14px; border: 4px solid #8b5a2b; background: var(--paper); font-family: var(--font-pixel); font-size: 16px; }
 #hint { position: absolute; left: 50%; bottom: 14px; transform: translateX(-50%); background: rgba(16,53,35,.85); color: var(--cream); font-family: var(--font-pixel); padding: 6px 16px; z-index: 12; pointer-events: none; }
+#visit-badge { position: absolute; left: 16px; top: calc(var(--nav-height) + 12px); background: rgba(16,53,35,.9); color: var(--cream); font-family: var(--font-pixel); font-size: 14px; padding: 6px 12px; z-index: 15; pointer-events: none; border: 3px solid #8b5a2b; box-shadow: 3px 3px 0 rgba(0,0,0,.35); }
 
 /* toasts */
 #toasts { position: absolute; top: 80px; left: 50%; transform: translateX(-50%); display: grid; gap: 8px; z-index: 40; pointer-events: none; }
