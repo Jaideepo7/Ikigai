@@ -33,6 +33,8 @@ class Boot extends Phaser.Scene {
     this.load.image('flower', '/assets/scenes/flower.png');
     this.load.image('decor_tree_emerald', '/assets/scenes/decor_tree_emerald.png');
     this.load.image('decor_tree_lime', '/assets/scenes/decor_tree_lime.png');
+    for (let i = 1; i <= 4; i++) this.load.image(`decor_rock_${i}`, `/assets/scenes/decor_rock_${i}.png`);
+    for (let i = 1; i <= 4; i++) this.load.image(`decor_bush_${i}`, `/assets/scenes/decor_bush_${i}.png`);
   }
   create() {
     for (let i = 0; i < CHARACTERS; i++) {

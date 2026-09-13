@@ -107,7 +107,7 @@ export class GardenScene extends Phaser.Scene {
     solidRect(this, this.walls, hx0, hy0, this.doorX - 34 - hx0, hy1 - hy0);
     solidRect(this, this.walls, this.doorX + 34, hy0, hx1 - this.doorX - 34, hy1 - hy0);
     solidRect(this, this.walls, hx0, hy0, hx1 - hx0, hy1 - 80 - hy0);
-    this.drawDecorTrees();
+    this.drawDecorScenery();
 
     // ---- garden contents ----
     this.plotLayer = this.add.container(0, 0).setDepth(-5); // soil only; plants are scene children so they y-sort with the player
@@ -159,37 +159,46 @@ export class GardenScene extends Phaser.Scene {
     this.pendingRefresh = false;
   }
 
-  /** Permanent scenery in the outer grass; a separate seed keeps it stable across redraws. */
-  private drawDecorTrees() {
-    const rnd = new Phaser.Math.RandomDataGenerator([`decor-trees-${this.ownerId}`]);
+  /** Permanent scenery in the outer grass; a separate seed keeps it stable across redraws. Trees, rocks
+   * and bushes all share one overlap check so nothing collides with anything else out there. */
+  private drawDecorScenery() {
+    const rnd = new Phaser.Math.RandomDataGenerator([`decor-${this.ownerId}`]);
     const gx = this.ox + this.gc0 * T, gy = this.oy + this.gr0 * T, size = this.n * T;
-    const keys = ['decor_tree_emerald', 'decor_tree_lime'];
     const placed: { x: number; y: number; r: number }[] = [];
-    const place = (x: number, y: number, height: number) => {
-      const key = keys[rnd.between(0, 1)];
+    const place = (key: string, x: number, y: number, height: number, collider: 'trunk' | 'body' | 'none') => {
       const src = this.textures.get(key).getSourceImage();
       const scale = Math.min(height / src.height, (MARGIN * T - 48) / src.width);
-      // Bounding-circle radius so two canopies never overlap, whichever direction they're offset in.
+      // Bounding-circle radius so two decor pieces never overlap, whichever direction they're offset in.
       const r = Math.max(src.width, src.height) * scale / 2;
       for (const p of placed) if (Phaser.Math.Distance.Between(x, y, p.x, p.y) < r + p.r) return false;
-      const tree = this.add.image(Math.round(x), Math.round(y), key).setOrigin(0.5, 1).setName('garden-decor-tree');
-      tree.setScale(scale);
-      tree.setFlipX(rnd.frac() < 0.5).setDepth(tree.y);
-      // Only the trunk blocks walking; the canopy sorts above players behind it.
-      solidRect(this, this.walls, tree.x - 14, tree.y - 20, 28, 20);
+      const img = this.add.image(Math.round(x), Math.round(y), key).setOrigin(0.5, 1).setName('garden-decor');
+      img.setScale(scale).setFlipX(rnd.frac() < 0.5).setDepth(img.y);
+      if (collider === 'trunk') {
+        // Trees: only the trunk blocks walking; the canopy sorts above players behind it.
+        solidRect(this, this.walls, img.x - 14, img.y - 20, 28, 20);
+      } else if (collider === 'body') {
+        // Rocks: solid across most of their footprint. Bushes get no collider at all (passable).
+        const w = img.displayWidth * 0.6, h = img.displayHeight * 0.42;
+        solidRect(this, this.walls, img.x - w / 2, img.y - h - 4, w, h);
+      }
       placed.push({ x, y, r });
       return true;
     };
     // Random count and scatter — left margin, right margin, or below the fence — never inside it.
-    const count = rnd.between(5, 10);
-    for (let i = 0; i < count; i++) {
-      const zone = rnd.frac();
-      let x: number, y: number, height: number;
-      if (zone < 0.42) { x = gx - rnd.realInRange(20, MARGIN * T - 20); y = gy + rnd.realInRange(0, size); height = rnd.between(150, 220); }
-      else if (zone < 0.84) { x = gx + size + rnd.realInRange(20, MARGIN * T - 20); y = gy + rnd.realInRange(0, size); height = rnd.between(150, 220); }
-      else { x = gx + rnd.realInRange(-20, size + 20); y = gy + size + rnd.realInRange(40, 150); height = rnd.between(140, 170); }
-      for (let attempt = 0; attempt < 15 && !place(x, y, height); attempt++) { x += rnd.realInRange(-30, 30); y += rnd.realInRange(-30, 30); }
-    }
+    const scatter = (count: number, keys: string[], sideHeight: [number, number], edgeHeight: [number, number], collider: 'trunk' | 'body' | 'none') => {
+      for (let i = 0; i < count; i++) {
+        const zone = rnd.frac();
+        let x: number, y: number, height: number;
+        if (zone < 0.42) { x = gx - rnd.realInRange(20, MARGIN * T - 20); y = gy + rnd.realInRange(0, size); height = rnd.between(...sideHeight); }
+        else if (zone < 0.84) { x = gx + size + rnd.realInRange(20, MARGIN * T - 20); y = gy + rnd.realInRange(0, size); height = rnd.between(...sideHeight); }
+        else { x = gx + rnd.realInRange(-20, size + 20); y = gy + size + rnd.realInRange(40, 150); height = rnd.between(...edgeHeight); }
+        const key = keys[rnd.between(0, keys.length - 1)];
+        for (let attempt = 0; attempt < 15 && !place(key, x, y, height, collider); attempt++) { x += rnd.realInRange(-30, 30); y += rnd.realInRange(-30, 30); }
+      }
+    };
+    scatter(rnd.between(5, 10), ['decor_tree_emerald', 'decor_tree_lime'], [150, 220], [140, 170], 'trunk');
+    scatter(rnd.between(3, 6), ['decor_rock_1', 'decor_rock_2', 'decor_rock_3', 'decor_rock_4'], [50, 85], [45, 70], 'body');
+    scatter(rnd.between(3, 6), ['decor_bush_1', 'decor_bush_2', 'decor_bush_3', 'decor_bush_4'], [55, 95], [50, 80], 'none');
   }
 
   // ---------- tiles ----------
