@@ -577,10 +577,23 @@ export async function friendsPanel(silent = false) {
     ${f.status === 'accepted' ? `<button class="btn sm sage" data-visit="${f.id}" data-name="${esc(f.username)}">Visit</button>` : f.status === 'incoming' ? `<button class="btn sm sage" data-accept="${f.id}">Accept</button>` : ''}<button class="btn sm rose" data-remove="${f.id}" title="${f.status === 'incoming' ? 'Decline' : 'Remove'}">✕</button></div>`;
   const typed = (panelEl?.dataset.name === 'friends' && (panelEl.querySelector('#fcode') as HTMLInputElement | null)?.value) || '';
   const p = openPanel(`<h2>👥 Friends</h2><p class="sub">Share your code so friends can add you. Requests and accepts arrive instantly.</p>
-    <div class="code-box"><span>Your code</span><span class="code">${data.code}</span><input id="fcode" maxlength="6" placeholder="FRIEND CODE" value="${esc(typed)}" /><button class="btn sm" id="fadd">Add</button></div>
+    <div class="code-box"><span>Your code</span><button type="button" class="code" id="copy-fcode" aria-label="Copy friend code ${esc(data.code)}" title="Copy friend code">${esc(data.code)}</button><input id="fcode" maxlength="6" placeholder="FRIEND CODE" value="${esc(typed)}" /><button class="btn sm" id="fadd">Add</button></div>
     ${data.friends.map(row).join('') || '<p class="sub">No friends yet. Send someone your code!</p>'}`);
   name('friends');
   if (!friendsPoll) friendsPoll = window.setInterval(() => friendsPanel(true), 15000);
+  p.querySelector<HTMLButtonElement>('#copy-fcode')!.addEventListener('click', async (e) => {
+    const button = e.currentTarget as HTMLButtonElement, code = data.code;
+    try {
+      if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(code);
+      else {
+        const copy = document.createElement('textarea'); copy.value = code; copy.className = 'clipboard-copy'; document.body.appendChild(copy); copy.select();
+        const copied = document.execCommand('copy'); copy.remove();
+        if (!copied) throw new Error('Copy failed');
+      }
+      button.textContent = 'Copied!'; button.classList.add('copied'); sfx.click();
+      setTimeout(() => { if (button.isConnected) { button.textContent = code; button.classList.remove('copied'); } }, 1200);
+    } catch { toast('Could not copy the code.', 'err'); }
+  });
   p.querySelector('#fadd')!.addEventListener('click', async () => { try { await api.post('/api/friends/request', { code: (p.querySelector('#fcode') as HTMLInputElement).value }); toast('Request sent!'); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } });
   p.querySelectorAll<HTMLElement>('[data-accept]').forEach((b) => b.addEventListener('click', async () => { try { await api.post('/api/friends/accept', { user_id: Number(b.dataset.accept) }); sfx.chime(); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));
   p.querySelectorAll<HTMLElement>('[data-remove]').forEach((b) => b.addEventListener('click', async () => { try { await api.del(`/api/friends/${b.dataset.remove}`); friendsLast = ''; friendsPanel(); } catch (e) { err(e); } }));

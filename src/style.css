@@ -262,7 +262,12 @@ h1, h2, h3, .pixel { font-family: var(--font-pixel); font-weight: 600; letter-sp
 .friend .grow { flex: 1; }
 .code-box { display: flex; gap: 8px; align-items: center; margin: 8px 0 14px; font-family: var(--font-pixel); }
 .code-box input { flex: 1; padding: 8px 12px; border: 3px solid #d9c8a5; text-transform: uppercase; }
-.code-box .code { background: var(--forest); color: var(--cream); padding: 6px 14px; font-size: 20px; letter-spacing: 3px; }
+.code-box .code { min-width: 190px; padding: 6px 14px; border: 3px solid var(--forest); background: var(--forest); color: var(--cream); font-family: var(--font-pixel); font-size: 20px; letter-spacing: 3px; cursor: pointer; box-shadow: 3px 3px 0 #000; }
+.code-box .code:hover, .code-box .code:focus-visible { background: #1d5338; }
+.code-box .code:focus-visible { outline: 3px solid var(--bark); outline-offset: 3px; }
+.code-box .code:active { transform: translate(2px, 2px); box-shadow: 1px 1px 0 #000; }
+.code-box .code.copied { background: var(--sage); color: var(--forest); }
+.clipboard-copy { position: fixed; left: -9999px; opacity: 0; }
 
 /* chat */
 #chat { position: absolute; left: 50%; bottom: 20px; transform: translateX(-50%); width: 420px; z-index: 15; }
